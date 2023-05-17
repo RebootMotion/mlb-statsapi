@@ -1,5 +1,6 @@
 import functools
 
+
 def try_and_log(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -8,4 +9,5 @@ def try_and_log(f):
         except Exception as e:
             # TODO Print stack trace and metadata
             pass
+
     return wrapper
