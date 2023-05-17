@@ -40,3 +40,10 @@ class Trajectory(str, Enum):
     POPUP = "popup"
 
 
+class PlayEventType(str, Enum):
+    ACTION = "action"
+    NO_PITCH = "no_pitch"
+    PICKOFF = "pickoff"
+    PITCH = "pitch"
+
+    

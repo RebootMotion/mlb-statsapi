@@ -1,13 +1,6 @@
 from typing import Any
 import re
 
-def list_play_ids(game: dict) -> list[str]:
-    plays = game['liveData']['plays']['allPlays']
-    res = []
-    for play in plays:
-        res.append(play['playEvents'][-1]['playId'])
-    return res
-
 
 def explore_object(data: Any, path: str, print_val: bool = False) -> set[Any]:
     if path == "":
@@ -43,4 +36,4 @@ def explore_object(data: Any, path: str, print_val: bool = False) -> set[Any]:
     else:
         raise RuntimeError(f"Unable to parse path {path}")
 
-    pass
+
