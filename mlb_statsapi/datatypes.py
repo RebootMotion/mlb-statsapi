@@ -1,15 +1,24 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from decimal import Decimal
-from enum import Enum
 from typing import Any, Sequence
 
 import pandas as pd
 
-from .constants import PlayEventType, PlayResult, Trajectory
-from .decorators import try_and_log
+from .constants import (
+    NULL_KEY,
+    VIDEO_URL_ROOT,
+    PlayEventType,
+    PlayResult,
+    Trajectory,
+)
 
 logger = logging.getLogger(__name__)
+
+
+FAKE_DEFAULT: Any = object()
 
 
 def decimal_from_float(f: float) -> Decimal:
@@ -38,9 +47,14 @@ class Metadata:
 
 @dataclass
 class Base:
-    _metadata: Metadata = field(repr=False)
     _raw: dict[str, Any] = field(repr=False)
+    _metadata: Metadata = field(
+        default_factory=lambda: Metadata(keys=[NULL_KEY]), repr=False
+    )  # TODO Verify this creates new copy of list
+    # Used for passing optional extra data to decorate the object
+    _extra_fields: dict[str, Any] = field(default_factory=dict)
 
+    # TODO Add a post post init to check that no FAKE_DEFAULT are still there
     def init_helper(self) -> None:
         # logger.debug(f"{type(self)} {self._metadata}")
         pass
@@ -52,17 +66,60 @@ class Base:
         if __name in self._raw:
             return self._raw[__name]
 
+        if __name in self._extra_fields:
+            return self._extra_fields[__name]
+
         raise AttributeError(
             f"'{self.__class__.__name__}' object has no attribute '{__name}'"
         )
 
 
 @dataclass
+class PlayVideo(Base):
+    id: str = field(default=FAKE_DEFAULT, init=False)
+    slug: str = field(default=FAKE_DEFAULT, init=False)
+
+    def __post_init__(self):
+        self.init_helper()
+
+        self.id = self._raw["mediaPlayback"][0]["id"]
+        self.slug = self._raw["mediaPlayback"][0]["slug"]
+
+    @property
+    def video_url(self) -> str:
+        return f"{VIDEO_URL_ROOT}{self.slug}"
+
+
+@dataclass
+class PlayVideos(Base):
+    play_videos: list[PlayVideo] = field(default=FAKE_DEFAULT, init=False)
+
+    def __post_init__(self):
+        self.init_helper()
+
+        self.play_videos = [
+            PlayVideo(
+                play_video,
+                self._metadata.add_key("plays").add_key_i(i),
+                {**self._extra_fields},
+            )
+            for i, play_video in enumerate(self._raw["data"]["search"]["plays"])
+        ]
+
+    @property
+    def video_url_by_play_id(self) -> dict[str, str]:
+        return {
+            play_video.id: play_video.video_url
+            for play_video in self.play_videos
+        }
+
+
+@dataclass
 class Swing(Base):
-    launch_angle: Decimal | None = field(init=False)
-    launch_speed: Decimal | None = field(init=False)
-    total_distance: Decimal | None = field(init=False)
-    trajectory: Trajectory | None = field(init=False)
+    launch_angle: Decimal | None = field(default=FAKE_DEFAULT, init=False)
+    launch_speed: Decimal | None = field(default=FAKE_DEFAULT, init=False)
+    total_distance: Decimal | None = field(default=FAKE_DEFAULT, init=False)
+    trajectory: Trajectory | None = field(default=FAKE_DEFAULT, init=False)
 
     def __post_init__(self):
         self.init_helper()
@@ -114,6 +171,11 @@ class PlayEvent(Base):
     swing: Swing | None = None
     pitch: Pitch | None = None
     play_result: PlayResult | None = None
+    description: str | None = None
+    batter_name: str | None = None
+    pitcher_name: str | None = None
+
+    _play_video: str | None = None
 
     def __post_init__(self):
         self.init_helper()
@@ -126,19 +188,72 @@ class PlayEvent(Base):
 
         self.play_id = self._raw["playId"]
         self.swing = (
-            Swing(self._metadata.add_key("hitData"), self._raw["hitData"])
+            Swing(
+                self._raw["hitData"],
+                self._metadata.add_key("hitData"),
+                {**self._extra_fields},
+            )
             if "hitData" in self._raw
             else None
         )
         self.pitch = (
-            Pitch(self._metadata.add_key("pitchData"), self._raw["pitchData"])
+            Pitch(
+                self._raw["pitchData"],
+                self._metadata.add_key("pitchData"),
+                {**self._extra_fields},
+            )
             if self._raw["isPitch"]
             else None
         )
 
+        self.description = self._raw["details"]["description"]
+
+        if "matchup" in self._extra_fields:
+            self.batter_name = self._extra_fields["matchup"]["batter"][
+                "fullName"
+            ]
+            self.pitcher_name = self._extra_fields["matchup"]["pitcher"][
+                "fullName"
+            ]
+
+    @property
+    def play_video(self) -> str | None:
+        # If video link == "", then that means we have already checked it and cannot get the video
+        if self._play_video == "":
+            return None
+        elif self._play_video != None:
+            return self._play_video
+
+        # If the decoration is in the extra fields, use that
+        if "play_videos" in self._extra_fields:
+            play_videos: PlayVideos = self._extra_fields["play_videos"]
+            self._play_video = play_videos.video_url_by_play_id.get(
+                self.play_id, ""
+            )
+            return self._play_video or None
+
+        if not (self.batter_name and self.pitcher_name and self.description):
+            self._play_video = ""
+            return None
+
+        # Transform to url format
+        pitcher_name = self.pitcher_name.lower().replace(" ", "-")
+        batter_name = self.batter_name.lower().replace(" ", "-")
+        description = (
+            self.description.lower()
+            .replace("(", "-")
+            .replace(")", "-")
+            .replace(" ", "-")
+            .replace(",", "")
+            .strip("-")
+        )
+
+        url = f"{VIDEO_URL_ROOT}{pitcher_name}-{description}-to-{batter_name}"
+
+        return url
+
 
 @dataclass
-# TODO A play can have multiple play events
 class Play(Base):
     play_events: list[PlayEvent] = field(init=False)
 
@@ -147,7 +262,12 @@ class Play(Base):
 
         self.play_events = [
             PlayEvent(
-                self._metadata.add_key("playEvents").add_key_i(i), play_event
+                play_event,
+                _metadata=self._metadata.add_key("playEvents").add_key_i(i),
+                _extra_fields={
+                    **self._extra_fields,
+                    "matchup": self._raw["matchup"],
+                },
             )
             for i, play_event in enumerate(self._raw["playEvents"])
         ]
@@ -187,6 +307,16 @@ class Play(Base):
             for o in getattr(self, parent_attr)
             if getattr(o, a1) is not None
         }
+    
+    @property
+    def play_video_by_play_id(self) -> dict[str, str]:
+        parent_attr = "play_events"
+        a1, a2 = "play_id", "play_video"
+        return {
+            getattr(o, a1): getattr(o, a2)
+            for o in getattr(self, parent_attr)
+            if getattr(o, a1) is not None
+        }
 
 
 @dataclass
@@ -199,7 +329,7 @@ class Game(Base):
             ["liveData", "plays", "allPlays"]
         )
         self.plays = [
-            Play(base_metadata.add_key_i(i), play)
+            Play(play, base_metadata.add_key_i(i), {**self._extra_fields})
             for i, play in enumerate(self._raw["liveData"]["plays"]["allPlays"])
         ]
 
@@ -223,6 +353,12 @@ class Game(Base):
     def play_event_by_play_id(self) -> dict[str, PlayEvent]:
         return {
             k: v for p in self.plays for k, v in p.play_event_by_play_id.items()
+        }
+    
+    @property
+    def play_video_by_play_id(self) -> dict[str, str]:
+        return {
+            k: v for p in self.plays for k, v in p.play_video_by_play_id.items()
         }
 
     def get_filtered_pitch_metrics_by_play_id(

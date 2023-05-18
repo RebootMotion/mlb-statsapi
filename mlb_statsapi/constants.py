@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from enum import Enum
 
 ROOT_KEY = ""
+NULL_KEY = "NULL"
 OTHER_EVENT_TYPES = {
     "balk",
     "batter_timeout",
@@ -13,6 +16,7 @@ OTHER_EVENT_TYPES = {
     "stolen_base_2b",
     "stolen_base_3b",
 }
+VIDEO_URL_ROOT = "https://www.mlb.com/video/"
 
 
 class PlayResult(str, Enum):
