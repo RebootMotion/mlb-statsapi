@@ -10,6 +10,8 @@ import pandas as pd
 from .constants import (
     NULL_KEY,
     VIDEO_URL_ROOT,
+    ALL_HIT_METRICS,
+    ALL_PITCH_METRICS,
     PlayEventType,
     PlayResult,
     Trajectory,
@@ -362,8 +364,13 @@ class Game(Base):
         }
 
     def get_filtered_pitch_metrics_by_play_id(
-        self, metrics: list[str], play_ids: Sequence[str] | None = None
+        self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
     ) -> dict[str, dict[str, Any]]:
+        """
+        :param metrics: Optional list of metrics for the result. Omit to get all metrics
+        :param play_ids: Optional list of play ids to filter down the result
+        """
+        metrics = metrics or ALL_PITCH_METRICS
         pitches_by_play_id = self.pitches_by_play_id
         if play_ids:
             pitches_by_play_id = {
@@ -375,8 +382,13 @@ class Game(Base):
         }
 
     def get_filtered_pitch_metrics_by_play_id_as_df(
-        self, metrics: list[str], play_ids: Sequence[str] | None = None
+        self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
     ) -> pd.DataFrame:
+        """
+        :param metrics: Optional list of metrics for the result. Omit to get all metrics
+        :param play_ids: Optional list of play ids to filter down the result
+        """
+        metrics = metrics or ALL_PITCH_METRICS
         return pd.DataFrame.from_dict(
             self.get_filtered_pitch_metrics_by_play_id(
                 metrics, play_ids=play_ids
@@ -385,8 +397,13 @@ class Game(Base):
         )
 
     def get_filtered_swing_metrics_by_play_id(
-        self, metrics: list[str], play_ids: Sequence[str] | None = None
+        self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
     ) -> dict[str, dict[str, Any]]:
+        """
+        :param metrics: Optional list of metrics for the result. Omit to get all metrics
+        :param play_ids: Optional list of play ids to filter down the result
+        """
+        metrics = metrics or ALL_HIT_METRICS
         swings_by_play_id = self.swings_by_play_id
         if play_ids:
             swings_by_play_id = {
@@ -400,8 +417,13 @@ class Game(Base):
         }
 
     def get_filtered_swing_metrics_by_play_id_as_df(
-        self, metrics: list[str], play_ids: Sequence[str] | None = None
+        self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
     ) -> pd.DataFrame:
+        """
+        :param metrics: Optional list of metrics for the result. Omit to get all metrics
+        :param play_ids: Optional list of play ids to filter down the result
+        """
+        metrics = metrics or ALL_HIT_METRICS
         return pd.DataFrame.from_dict(
             self.get_filtered_swing_metrics_by_play_id(
                 metrics, play_ids=play_ids
