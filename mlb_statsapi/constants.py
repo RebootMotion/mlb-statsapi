@@ -60,3 +60,14 @@ class PlayEventType(str, Enum):
     NO_PITCH = "no_pitch"
     PICKOFF = "pickoff"
     PITCH = "pitch"
+
+
+class PitchTypes(str, Enum):
+    FOUR_SEAM_FASTBALL = "Four-Seam Fastball"
+    SINKER = "Sinker"
+    CHANGEUP = "Changeup"
+    SLIDER = "Slider"
+    CUTTER = "Cutter"
+    SPLITTER = "Splitter"
+    SWEEPER = "Sweeper"
+    CURVEBALL = "Curveball"

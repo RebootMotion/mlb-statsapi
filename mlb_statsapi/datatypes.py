@@ -201,6 +201,7 @@ class Pitch(Base):
     spin_rate: int | None = field(init=False)
     spin_direction: int | None = field(init=False)
     zone: int = field(init=False)
+    pitch_type: str | None = None
 
     def __post_init__(self):
         self.init_helper()
@@ -215,6 +216,9 @@ class Pitch(Base):
         )
         self.zone = t(lambda: self._raw["zone"])
 
+        if "pitch_type" in self._extra_fields:
+            self.pitch_type = t(lambda: self._extra_fields["pitch_type"])
+
     @property
     def velocity(self) -> Decimal:
         return self.start_speed
@@ -228,6 +232,7 @@ class PlayEvent(Base):
     pitch: Pitch | None = None
     play_result: PlayResult | None = None
     description: str | None = None
+    pitch_description: str | None = None
     batter_name: str | None = None
     pitcher_name: str | None = None
 
@@ -243,6 +248,9 @@ class PlayEvent(Base):
             return
 
         self.play_id = t(lambda: self._raw["playId"])
+        self.description = t(lambda: self._raw["details"]["description"])
+        self.pitch_description = t(lambda: self._raw["details"]["type"]["description"])
+
         self.swing = t(
             lambda: (
                 Swing(
@@ -259,14 +267,13 @@ class PlayEvent(Base):
                 Pitch(
                     self._raw["pitchData"],
                     self._metadata.add_key("pitchData"),
-                    {**self._extra_fields},
+                    {**self._extra_fields, "pitch_type": self.pitch_description},
                 )
                 if self._raw["isPitch"]
                 else None
             )
         )
 
-        self.description = t(lambda: self._raw["details"]["description"])
 
         if "matchup" in self._extra_fields:
             self.batter_name = t(
