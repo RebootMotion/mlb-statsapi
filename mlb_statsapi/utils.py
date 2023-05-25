@@ -43,3 +43,63 @@ def explore_object(data: Any, path: str, print_val: bool = False) -> set[Any]:
         return explore_object(data[key], path[i:])
     else:
         raise RuntimeError(f"Unable to parse path {path}")
+
+
+BLACKLISTED_KEYS = {".gameData.players", ".liveData.boxscore.teams.away.players", ".liveData.boxscore.teams.home.players"}
+def list_attributes(data: Any, key: str = "") -> Any:
+    if key in BLACKLISTED_KEYS:
+        return ("TRUNCATED", None)
+    
+    if type(data) == dict:
+        res = {}
+        for k, v in data.items():
+            next_key = f"{key}.{k}"
+            res[next_key] = list_attributes(v, next_key)
+        return ("dict", res)
+    elif type(data) == list:
+        next_key = f"{key}.[]"
+        if len(data) == 0:
+            return ("list", None)
+        elt = data[0]  # TODO Have this look at all elements and collate the results instead of just the first element
+        attributes = list_attributes(elt, next_key)
+        if not attributes[1]:
+            return (f"list[{attributes[0]}]", None)
+        else:
+            return ("list[object]", attributes)
+    else:
+        return (type(data).__name__, None)
+    
+
+def print_attributes(key: str, attributes: Any, indent: int = 0) -> None:
+    type_name = attributes[0]
+    indent_str = '    ' * indent
+    prefix = f"{indent_str}{key}"
+    prefix = f"{prefix:<70}"
+
+    if attributes[1] is None:
+        print(f"{prefix}\t\t{type_name}")
+    elif isinstance(attributes[1], tuple):
+        print(f"{prefix}\t\t{type_name}")
+        print_attributes(key, attributes[1], indent)
+    else:
+        print(f"{prefix}\t\t{type_name}")
+        for k, v in attributes[1].items():
+            print_attributes(k, v, indent+1)
+
+
+def all_attributes(attributes: Any) -> set[str]:
+    type_name = attributes[0]
+
+    if attributes[1] is None:
+        # terminal type so don't need to do anything furtehr
+        return set()
+    elif isinstance(attributes[1], tuple):
+        return all_attributes(attributes[1])
+    else:
+        # it is a dictionary
+        res = set()
+        for k, v in attributes[1].items():
+            if v[0] != 'dict':
+                res.add(k)
+            res |= all_attributes(v)
+        return res

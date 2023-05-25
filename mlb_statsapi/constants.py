@@ -16,27 +16,6 @@ OTHER_EVENT_TYPES = {
     "stolen_base_2b",
     "stolen_base_3b",
 }
-ALL_HIT_METRICS = [
-    'coordinates',
-    'hardness',
-    'launchAngle',
-    'launchSpeed',
-    'location',
-    'totalDistance',
-    'trajectory'
-]
-ALL_PITCH_METRICS = [
-    'breaks',
-    'coordinates',
-    'endSpeed',
-    'extension',
-    'plateTime',
-    'startSpeed',
-    'strikeZoneBottom',
-    'strikeZoneTop',
-    'typeConfidence',
-    'zone'
-]
 VIDEO_URL_ROOT = "https://www.mlb.com/video/"
 
 

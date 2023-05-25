@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+import dataclasses
 from decimal import Decimal
 from typing import Any, Sequence
 
 import pandas as pd
 
+from . import utils as ut
 from .constants import (
     NULL_KEY,
     VIDEO_URL_ROOT,
-    ALL_HIT_METRICS,
-    ALL_PITCH_METRICS,
     PlayEventType,
     PlayResult,
     Trajectory,
@@ -58,8 +58,48 @@ class Base:
 
     # TODO Add a post post init to check that no FAKE_DEFAULT are still there
     def init_helper(self) -> None:
-        # logger.debug(f"{type(self)} {self._metadata}")
+        logger.debug(f"{type(self)} {self._metadata}")
         pass
+
+    @classmethod
+    def subclass_field_names(cls) -> set[str]:
+        """
+        Returns all explicitly defined fields in the subclass
+        """
+        parent_fields = {f.name for f in dataclasses.fields(Base)}
+        field_names = {f.name for f in dataclasses.fields(cls) if f.name not in parent_fields}
+        return field_names
+    
+    @property
+    def all_terminal_fields(self) -> set[str]:
+        """
+        Returns all explicitly defined fields in the subclass plus all terminal fields in the raw json
+        """
+        dataclass_fields = self.subclass_field_names()
+        raw_fields = ut.all_attributes(ut.list_attributes(self._raw))
+        return dataclass_fields | raw_fields
+    
+    @property
+    def flattened_values(self) -> dict[str, Any]:
+        """
+        Maps all terminal fields to their value
+        """
+        res = {}
+        for k in self.all_terminal_fields:
+            res[k] = self.get_flattened_value(k)
+        return res
+    
+    def get_flattened_value(self, k: str) -> Any:
+        """
+        Enables you to get values multiple layers deep in the raw json object
+        """
+        # Use leading . to denote in _raw
+        if k[0] == ".":
+            v = ut.explore_object(self._raw, k)
+            assert len(v) == 1
+            return [*v][0]
+        else:
+            return getattr(self, k)
 
     # __getattr__ is only call if the attribute is not found by default (default call is to __getattribute__)
     # Override the fallback behavior so that it looks in the underlying object before raising an error
@@ -67,7 +107,7 @@ class Base:
     def __getattr__(self, __name: str) -> Any:
         if __name in self._raw:
             return self._raw[__name]
-
+        
         if __name in self._extra_fields:
             return self._extra_fields[__name]
 
@@ -148,8 +188,8 @@ class Swing(Base):
 class Pitch(Base):
     start_speed: Decimal = field(init=False)
     end_speed: Decimal = field(init=False)
-    spin_rate: int = field(init=False)
-    spin_direction: int = field(init=False)
+    spin_rate: int | None = field(init=False)
+    spin_direction: int | None = field(init=False)
     zone: int = field(init=False)
 
     def __post_init__(self):
@@ -157,8 +197,8 @@ class Pitch(Base):
 
         self.start_speed = decimal_from_float(self._raw["startSpeed"])
         self.end_speed = decimal_from_float(self._raw["endSpeed"])
-        self.spin_rate = self._raw["breaks"]["spinRate"]
-        self.spin_direction = self._raw["breaks"]["spinDirection"]
+        self.spin_rate = self._raw["breaks"].get("spinRate")
+        self.spin_direction = self._raw["breaks"].get("spinDirection")
         self.zone = self._raw["zone"]
 
     @property
@@ -337,28 +377,43 @@ class Game(Base):
 
     @property
     def play_ids(self) -> list[str]:
+        """
+        :return: list of play ids for this game
+        """
         return [elt for p in self.plays for elt in p.play_ids]
 
     @property
     def pitches_by_play_id(self) -> dict[str, Pitch]:
+        """
+        :return: Map of play id to pitch objects
+        """
         return {
             k: v for p in self.plays for k, v in p.pitches_by_play_id.items()
         }
 
     @property
     def swings_by_play_id(self) -> dict[str, Swing]:
+        """
+        :return: Map of play id to swing objects
+        """
         return {
             k: v for p in self.plays for k, v in p.swings_by_play_id.items()
         }
 
     @property
     def play_event_by_play_id(self) -> dict[str, PlayEvent]:
+        """
+        :return: Map of play id to play event objects
+        """
         return {
             k: v for p in self.plays for k, v in p.play_event_by_play_id.items()
         }
     
     @property
     def play_video_by_play_id(self) -> dict[str, str]:
+        """
+        :return: Map of play id to play video url
+        """
         return {
             k: v for p in self.plays for k, v in p.play_video_by_play_id.items()
         }
@@ -369,17 +424,26 @@ class Game(Base):
         """
         :param metrics: Optional list of metrics for the result. Omit to get all metrics
         :param play_ids: Optional list of play ids to filter down the result
+
+        :result: Nested dictionary for plays and metrics
         """
-        metrics = metrics or ALL_PITCH_METRICS
         pitches_by_play_id = self.pitches_by_play_id
         if play_ids:
             pitches_by_play_id = {
                 k: v for k, v in pitches_by_play_id.items() if k in play_ids
             }
-        return {
-            play_id: {metric: getattr(pitch, metric) for metric in metrics}
-            for play_id, pitch in pitches_by_play_id.items()
-        }
+
+        if metrics:
+            return {
+                play_id: {metric: pitch.get_flattened_value(metric) for metric in metrics}
+                for play_id, pitch in pitches_by_play_id.items()
+            }
+        else:
+            return {
+                play_id: pitch.flattened_values
+                for play_id, pitch in pitches_by_play_id.items()
+            }
+
 
     def get_filtered_pitch_metrics_by_play_id_as_df(
         self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
@@ -387,8 +451,9 @@ class Game(Base):
         """
         :param metrics: Optional list of metrics for the result. Omit to get all metrics
         :param play_ids: Optional list of play ids to filter down the result
+
+        :result: DataFrame with plays and metrics
         """
-        metrics = metrics or ALL_PITCH_METRICS
         return pd.DataFrame.from_dict(
             self.get_filtered_pitch_metrics_by_play_id(
                 metrics, play_ids=play_ids
@@ -402,19 +467,25 @@ class Game(Base):
         """
         :param metrics: Optional list of metrics for the result. Omit to get all metrics
         :param play_ids: Optional list of play ids to filter down the result
+
+        :result: Nested dictionary for plays and metrics
         """
-        metrics = metrics or ALL_HIT_METRICS
         swings_by_play_id = self.swings_by_play_id
         if play_ids:
             swings_by_play_id = {
                 k: v for k, v in swings_by_play_id.items() if k in play_ids
             }
-        return {
-            play_id: {
-                metric: getattr(swing, metric, None) for metric in metrics
+
+        if metrics:
+            return {
+                play_id: {metric: (swing.get_flattened_value(metric) if swing else None) for metric in metrics }
+                for play_id, swing in swings_by_play_id.items()
             }
-            for play_id, swing in swings_by_play_id.items()
-        }
+        else:
+            return {
+                play_id: swing.flattened_values if swing else {"": None}
+                for play_id, swing in swings_by_play_id.items()
+            }
 
     def get_filtered_swing_metrics_by_play_id_as_df(
         self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
@@ -422,8 +493,9 @@ class Game(Base):
         """
         :param metrics: Optional list of metrics for the result. Omit to get all metrics
         :param play_ids: Optional list of play ids to filter down the result
+
+        :result: DataFrame with plays and metrics
         """
-        metrics = metrics or ALL_HIT_METRICS
         return pd.DataFrame.from_dict(
             self.get_filtered_swing_metrics_by_play_id(
                 metrics, play_ids=play_ids
