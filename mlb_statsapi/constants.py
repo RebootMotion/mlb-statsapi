@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 ROOT_KEY = ""
 NULL_KEY = "NULL"
@@ -17,6 +18,10 @@ OTHER_EVENT_TYPES = {
     "stolen_base_3b",
 }
 VIDEO_URL_ROOT = "https://www.mlb.com/video/"
+
+
+class MetaFields(str, Enum):
+    NOT_FOUND = "NOT_FOUND"
 
 
 class PlayResult(str, Enum):
@@ -55,3 +60,14 @@ class PlayEventType(str, Enum):
     NO_PITCH = "no_pitch"
     PICKOFF = "pickoff"
     PITCH = "pitch"
+
+
+class PitchTypes(str, Enum):
+    FOUR_SEAM_FASTBALL = "Four-Seam Fastball"
+    SINKER = "Sinker"
+    CHANGEUP = "Changeup"
+    SLIDER = "Slider"
+    CUTTER = "Cutter"
+    SPLITTER = "Splitter"
+    SWEEPER = "Sweeper"
+    CURVEBALL = "Curveball"
