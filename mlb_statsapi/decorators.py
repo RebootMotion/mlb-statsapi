@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import functools
+from .constants import MetaFields
+from typing import Any
 
-
-def try_and_log(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        try:
-            return f(*args, **kwargs)
-        except Exception as e:
-            # TODO Print stack trace and metadata
-            pass
-
-    return wrapper
+# Requires a zero argument callable that we try to run as normal. 
+# If f errors, return a special value
+def t(f) -> Any:
+    try:
+        return f()
+    except (AttributeError, KeyError) as e:
+        print("MISSING ELEMENT")
+        # TODO Print stack trace and more metadata
+        return MetaFields.NOT_FOUND

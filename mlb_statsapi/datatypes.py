@@ -16,6 +16,7 @@ from .constants import (
     PlayResult,
     Trajectory,
 )
+from .decorators import t
 
 logger = logging.getLogger(__name__)
 
@@ -124,8 +125,8 @@ class PlayVideo(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.id = self._raw["mediaPlayback"][0]["id"]
-        self.slug = self._raw["mediaPlayback"][0]["slug"]
+        self.id = t(lambda: self._raw["mediaPlayback"][0]["id"])
+        self.slug = t(lambda: self._raw["mediaPlayback"][0]["slug"])
 
     @property
     def video_url(self) -> str:
@@ -139,14 +140,14 @@ class PlayVideos(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.play_videos = [
+        self.play_videos = t(lambda: [
             PlayVideo(
                 play_video,
                 self._metadata.add_key("plays").add_key_i(i),
                 {**self._extra_fields},
             )
             for i, play_video in enumerate(self._raw["data"]["search"]["plays"])
-        ]
+        ])
 
     @property
     def video_url_by_play_id(self) -> dict[str, str]:
@@ -166,22 +167,22 @@ class Swing(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.launch_angle = (
+        self.launch_angle = t(lambda: (
             decimal_from_float(self._raw["launchAngle"])
             if "launchAngle" in self._raw
             else None
-        )
-        self.launch_speed = (
+        ))
+        self.launch_speed = t(lambda: (
             decimal_from_float(self._raw["launchSpeed"])
             if "launchSpeed" in self._raw
             else None
-        )
-        self.total_distance = (
+        ))
+        self.total_distance = t(lambda: (
             decimal_from_float(self._raw["totalDistance"])
             if "totalDistance" in self._raw
             else None
-        )
-        self.trajectory = Trajectory(self._raw["trajectory"])
+        ))
+        self.trajectory = t(lambda: Trajectory(self._raw["trajectory"]))
 
 
 @dataclass
@@ -195,11 +196,11 @@ class Pitch(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.start_speed = decimal_from_float(self._raw["startSpeed"])
-        self.end_speed = decimal_from_float(self._raw["endSpeed"])
-        self.spin_rate = self._raw["breaks"].get("spinRate")
-        self.spin_direction = self._raw["breaks"].get("spinDirection")
-        self.zone = self._raw["zone"]
+        self.start_speed = t(lambda: decimal_from_float(self._raw["startSpeed"]))
+        self.end_speed = t(lambda: decimal_from_float(self._raw["endSpeed"]))
+        self.spin_rate = t(lambda: self._raw["breaks"].get("spinRate"))
+        self.spin_direction = t(lambda: self._raw["breaks"].get("spinDirection"))
+        self.zone = t(lambda: self._raw["zone"])
 
     @property
     def velocity(self) -> Decimal:
@@ -222,14 +223,14 @@ class PlayEvent(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.play_event_type = PlayEventType(self._raw["type"])
+        self.play_event_type = t(lambda: PlayEventType(self._raw["type"]))
         # self.play_result = PlayResult.from_bools(self._raw['details']['isInPlay'], self._raw['details']['isStrike'], self._raw['details']['isBall'])
 
         if self.play_event_type != PlayEventType.PITCH:
             return
 
-        self.play_id = self._raw["playId"]
-        self.swing = (
+        self.play_id = t(lambda: self._raw["playId"])
+        self.swing = t(lambda: (
             Swing(
                 self._raw["hitData"],
                 self._metadata.add_key("hitData"),
@@ -237,8 +238,8 @@ class PlayEvent(Base):
             )
             if "hitData" in self._raw
             else None
-        )
-        self.pitch = (
+        ))
+        self.pitch = t(lambda: (
             Pitch(
                 self._raw["pitchData"],
                 self._metadata.add_key("pitchData"),
@@ -246,17 +247,17 @@ class PlayEvent(Base):
             )
             if self._raw["isPitch"]
             else None
-        )
+        ))
 
-        self.description = self._raw["details"]["description"]
+        self.description = t(lambda: self._raw["details"]["description"])
 
         if "matchup" in self._extra_fields:
-            self.batter_name = self._extra_fields["matchup"]["batter"][
+            self.batter_name = t(lambda: self._extra_fields["matchup"]["batter"][
                 "fullName"
-            ]
-            self.pitcher_name = self._extra_fields["matchup"]["pitcher"][
+            ])
+            self.pitcher_name = t(lambda: self._extra_fields["matchup"]["pitcher"][
                 "fullName"
-            ]
+            ])
 
     @property
     def play_video(self) -> str | None:
@@ -302,7 +303,7 @@ class Play(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.play_events = [
+        self.play_events = t(lambda: [
             PlayEvent(
                 play_event,
                 _metadata=self._metadata.add_key("playEvents").add_key_i(i),
@@ -312,7 +313,7 @@ class Play(Base):
                 },
             )
             for i, play_event in enumerate(self._raw["playEvents"])
-        ]
+        ])
 
     @property
     def play_ids(self) -> list[str]:
@@ -367,13 +368,13 @@ class Game(Base):
 
     def __post_init__(self):
         self.init_helper()
-        base_metadata = self._metadata.add_keys(
+        base_metadata = t(lambda: self._metadata.add_keys(
             ["liveData", "plays", "allPlays"]
-        )
-        self.plays = [
+        ))
+        self.plays = t(lambda: [
             Play(play, base_metadata.add_key_i(i), {**self._extra_fields})
             for i, play in enumerate(self._raw["liveData"]["plays"]["allPlays"])
-        ]
+        ])
 
     @property
     def play_ids(self) -> list[str]:
