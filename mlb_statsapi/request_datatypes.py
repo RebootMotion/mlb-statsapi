@@ -12,9 +12,6 @@ from .constants import ROOT_KEY
 from .datatypes import Base, Game, Metadata, PlayVideos
 
 
-
-
-
 class BaseRequest(ABC):
     BASE_URI = "https://statsapi.mlb.com/api"
     VERSION: str = "v1.1"
@@ -73,6 +70,7 @@ class GameRequest(BaseRequest):
     Wrapper object to make a request to the MLB Stats API for game data. After making the request, it unpacks the json into objects.
     It also decorates the Game object with video URLs
     """
+
     API_PATH: str = "/{VERSION}/game/{game_pk}/feed/live"
     DATATYPE = Game
 
@@ -86,8 +84,9 @@ class GameRequest(BaseRequest):
 
 class PlayVideoRequest(BaseRequest):
     """
-    Request Video URLs from the GraphQL endpoint from MLB. 
+    Request Video URLs from the GraphQL endpoint from MLB.
     """
+
     BASE_URI = "https://fastball-gateway.mlb.com/graphql"
     DATA = '{{"query":"query Search($query: String!, $page: Int, $limit: Int, $feedPreference: FeedPreference, $languagePreference: LanguagePreference, $contentPreference: ContentPreference, $queryType: QueryType = STRUCTURED, $withPlaybacksSegments: Boolean = false) {{\\r\\n  search(query: $query, limit: $limit, page: $page, feedPreference: $feedPreference, languagePreference: $languagePreference, contentPreference: $contentPreference, queryType: $queryType) {{\\r\\n    plays {{\\r\\n      mediaPlayback {{\\r\\n        ...MediaPlaybackFields\\r\\n        __typename\\r\\n      }}\\r\\n      __typename\\r\\n    }}\\r\\n    total\\r\\n    __typename\\r\\n  }}\\r\\n}}\\r\\n\\r\\nfragment MediaPlaybackFields on MediaPlayback {{\\r\\n  id\\r\\n  slug\\r\\n  feeds {{\\r\\n    playbacks {{\\r\\n      segments @include(if: $withPlaybacksSegments)\\r\\n    }}\\r\\n  }}\\r\\n}}","variables":{{"withPlaybacksSegments":false,"query":"gamePk = {game_pk} Order By Timestamp ASC","limit":{max_videos},"page":0,"languagePreference":"EN","contentPreference":"MIXED"}}}}'
     DATATYPE = PlayVideos

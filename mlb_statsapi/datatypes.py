@@ -1,21 +1,16 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass, field
-import dataclasses
 from decimal import Decimal
 from typing import Any, Sequence
 
 import pandas as pd
 
 from . import utils as ut
-from .constants import (
-    NULL_KEY,
-    VIDEO_URL_ROOT,
-    PlayEventType,
-    PlayResult,
-    Trajectory,
-)
+from .constants import (NULL_KEY, VIDEO_URL_ROOT, PlayEventType, PlayResult,
+                        Trajectory)
 from .decorators import t
 
 logger = logging.getLogger(__name__)
@@ -68,9 +63,13 @@ class Base:
         Returns all explicitly defined fields in the subclass
         """
         parent_fields = {f.name for f in dataclasses.fields(Base)}
-        field_names = {f.name for f in dataclasses.fields(cls) if f.name not in parent_fields}
+        field_names = {
+            f.name
+            for f in dataclasses.fields(cls)
+            if f.name not in parent_fields
+        }
         return field_names
-    
+
     @property
     def all_terminal_fields(self) -> set[str]:
         """
@@ -79,7 +78,7 @@ class Base:
         dataclass_fields = self.subclass_field_names()
         raw_fields = ut.all_attributes(ut.list_attributes(self._raw))
         return dataclass_fields | raw_fields
-    
+
     @property
     def flattened_values(self) -> dict[str, Any]:
         """
@@ -89,7 +88,7 @@ class Base:
         for k in self.all_terminal_fields:
             res[k] = self.get_flattened_value(k)
         return res
-    
+
     def get_flattened_value(self, k: str) -> Any:
         """
         Enables you to get values multiple layers deep in the raw json object
@@ -108,7 +107,7 @@ class Base:
     def __getattr__(self, __name: str) -> Any:
         if __name in self._raw:
             return self._raw[__name]
-        
+
         if __name in self._extra_fields:
             return self._extra_fields[__name]
 
@@ -140,14 +139,18 @@ class PlayVideos(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.play_videos = t(lambda: [
-            PlayVideo(
-                play_video,
-                self._metadata.add_key("plays").add_key_i(i),
-                {**self._extra_fields},
-            )
-            for i, play_video in enumerate(self._raw["data"]["search"]["plays"])
-        ])
+        self.play_videos = t(
+            lambda: [
+                PlayVideo(
+                    play_video,
+                    self._metadata.add_key("plays").add_key_i(i),
+                    {**self._extra_fields},
+                )
+                for i, play_video in enumerate(
+                    self._raw["data"]["search"]["plays"]
+                )
+            ]
+        )
 
     @property
     def video_url_by_play_id(self) -> dict[str, str]:
@@ -167,21 +170,27 @@ class Swing(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.launch_angle = t(lambda: (
-            decimal_from_float(self._raw["launchAngle"])
-            if "launchAngle" in self._raw
-            else None
-        ))
-        self.launch_speed = t(lambda: (
-            decimal_from_float(self._raw["launchSpeed"])
-            if "launchSpeed" in self._raw
-            else None
-        ))
-        self.total_distance = t(lambda: (
-            decimal_from_float(self._raw["totalDistance"])
-            if "totalDistance" in self._raw
-            else None
-        ))
+        self.launch_angle = t(
+            lambda: (
+                decimal_from_float(self._raw["launchAngle"])
+                if "launchAngle" in self._raw
+                else None
+            )
+        )
+        self.launch_speed = t(
+            lambda: (
+                decimal_from_float(self._raw["launchSpeed"])
+                if "launchSpeed" in self._raw
+                else None
+            )
+        )
+        self.total_distance = t(
+            lambda: (
+                decimal_from_float(self._raw["totalDistance"])
+                if "totalDistance" in self._raw
+                else None
+            )
+        )
         self.trajectory = t(lambda: Trajectory(self._raw["trajectory"]))
 
 
@@ -196,10 +205,14 @@ class Pitch(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.start_speed = t(lambda: decimal_from_float(self._raw["startSpeed"]))
+        self.start_speed = t(
+            lambda: decimal_from_float(self._raw["startSpeed"])
+        )
         self.end_speed = t(lambda: decimal_from_float(self._raw["endSpeed"]))
         self.spin_rate = t(lambda: self._raw["breaks"].get("spinRate"))
-        self.spin_direction = t(lambda: self._raw["breaks"].get("spinDirection"))
+        self.spin_direction = t(
+            lambda: self._raw["breaks"].get("spinDirection")
+        )
         self.zone = t(lambda: self._raw["zone"])
 
     @property
@@ -230,34 +243,38 @@ class PlayEvent(Base):
             return
 
         self.play_id = t(lambda: self._raw["playId"])
-        self.swing = t(lambda: (
-            Swing(
-                self._raw["hitData"],
-                self._metadata.add_key("hitData"),
-                {**self._extra_fields},
+        self.swing = t(
+            lambda: (
+                Swing(
+                    self._raw["hitData"],
+                    self._metadata.add_key("hitData"),
+                    {**self._extra_fields},
+                )
+                if "hitData" in self._raw
+                else None
             )
-            if "hitData" in self._raw
-            else None
-        ))
-        self.pitch = t(lambda: (
-            Pitch(
-                self._raw["pitchData"],
-                self._metadata.add_key("pitchData"),
-                {**self._extra_fields},
+        )
+        self.pitch = t(
+            lambda: (
+                Pitch(
+                    self._raw["pitchData"],
+                    self._metadata.add_key("pitchData"),
+                    {**self._extra_fields},
+                )
+                if self._raw["isPitch"]
+                else None
             )
-            if self._raw["isPitch"]
-            else None
-        ))
+        )
 
         self.description = t(lambda: self._raw["details"]["description"])
 
         if "matchup" in self._extra_fields:
-            self.batter_name = t(lambda: self._extra_fields["matchup"]["batter"][
-                "fullName"
-            ])
-            self.pitcher_name = t(lambda: self._extra_fields["matchup"]["pitcher"][
-                "fullName"
-            ])
+            self.batter_name = t(
+                lambda: self._extra_fields["matchup"]["batter"]["fullName"]
+            )
+            self.pitcher_name = t(
+                lambda: self._extra_fields["matchup"]["pitcher"]["fullName"]
+            )
 
     @property
     def play_video(self) -> str | None:
@@ -303,17 +320,19 @@ class Play(Base):
     def __post_init__(self):
         self.init_helper()
 
-        self.play_events = t(lambda: [
-            PlayEvent(
-                play_event,
-                _metadata=self._metadata.add_key("playEvents").add_key_i(i),
-                _extra_fields={
-                    **self._extra_fields,
-                    "matchup": self._raw["matchup"],
-                },
-            )
-            for i, play_event in enumerate(self._raw["playEvents"])
-        ])
+        self.play_events = t(
+            lambda: [
+                PlayEvent(
+                    play_event,
+                    _metadata=self._metadata.add_key("playEvents").add_key_i(i),
+                    _extra_fields={
+                        **self._extra_fields,
+                        "matchup": self._raw["matchup"],
+                    },
+                )
+                for i, play_event in enumerate(self._raw["playEvents"])
+            ]
+        )
 
     @property
     def play_ids(self) -> list[str]:
@@ -350,7 +369,7 @@ class Play(Base):
             for o in getattr(self, parent_attr)
             if getattr(o, a1) is not None
         }
-    
+
     @property
     def play_video_by_play_id(self) -> dict[str, str]:
         parent_attr = "play_events"
@@ -368,13 +387,17 @@ class Game(Base):
 
     def __post_init__(self):
         self.init_helper()
-        base_metadata = t(lambda: self._metadata.add_keys(
-            ["liveData", "plays", "allPlays"]
-        ))
-        self.plays = t(lambda: [
-            Play(play, base_metadata.add_key_i(i), {**self._extra_fields})
-            for i, play in enumerate(self._raw["liveData"]["plays"]["allPlays"])
-        ])
+        base_metadata = t(
+            lambda: self._metadata.add_keys(["liveData", "plays", "allPlays"])
+        )
+        self.plays = t(
+            lambda: [
+                Play(play, base_metadata.add_key_i(i), {**self._extra_fields})
+                for i, play in enumerate(
+                    self._raw["liveData"]["plays"]["allPlays"]
+                )
+            ]
+        )
 
     @property
     def play_ids(self) -> list[str]:
@@ -409,7 +432,7 @@ class Game(Base):
         return {
             k: v for p in self.plays for k, v in p.play_event_by_play_id.items()
         }
-    
+
     @property
     def play_video_by_play_id(self) -> dict[str, str]:
         """
@@ -420,7 +443,9 @@ class Game(Base):
         }
 
     def get_filtered_pitch_metrics_by_play_id(
-        self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
+        self,
+        metrics: Sequence[str] | None = None,
+        play_ids: Sequence[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         """
         :param metrics: Optional list of metrics for the result. Omit to get all metrics
@@ -436,7 +461,10 @@ class Game(Base):
 
         if metrics:
             return {
-                play_id: {metric: pitch.get_flattened_value(metric) for metric in metrics}
+                play_id: {
+                    metric: pitch.get_flattened_value(metric)
+                    for metric in metrics
+                }
                 for play_id, pitch in pitches_by_play_id.items()
             }
         else:
@@ -445,9 +473,10 @@ class Game(Base):
                 for play_id, pitch in pitches_by_play_id.items()
             }
 
-
     def get_filtered_pitch_metrics_by_play_id_as_df(
-        self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
+        self,
+        metrics: Sequence[str] | None = None,
+        play_ids: Sequence[str] | None = None,
     ) -> pd.DataFrame:
         """
         :param metrics: Optional list of metrics for the result. Omit to get all metrics
@@ -463,7 +492,9 @@ class Game(Base):
         )
 
     def get_filtered_swing_metrics_by_play_id(
-        self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
+        self,
+        metrics: Sequence[str] | None = None,
+        play_ids: Sequence[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         """
         :param metrics: Optional list of metrics for the result. Omit to get all metrics
@@ -479,7 +510,12 @@ class Game(Base):
 
         if metrics:
             return {
-                play_id: {metric: (swing.get_flattened_value(metric) if swing else None) for metric in metrics }
+                play_id: {
+                    metric: (
+                        swing.get_flattened_value(metric) if swing else None
+                    )
+                    for metric in metrics
+                }
                 for play_id, swing in swings_by_play_id.items()
             }
         else:
@@ -489,7 +525,9 @@ class Game(Base):
             }
 
     def get_filtered_swing_metrics_by_play_id_as_df(
-        self, metrics: Sequence[str] | None = None, play_ids: Sequence[str] | None = None
+        self,
+        metrics: Sequence[str] | None = None,
+        play_ids: Sequence[str] | None = None,
     ) -> pd.DataFrame:
         """
         :param metrics: Optional list of metrics for the result. Omit to get all metrics
