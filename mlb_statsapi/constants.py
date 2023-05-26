@@ -16,6 +16,7 @@ OTHER_EVENT_TYPES = {
     "pitching_substitution",
     "stolen_base_2b",
     "stolen_base_3b",
+    "stepoff",
 }
 VIDEO_URL_ROOT = "https://www.mlb.com/video/"
 
@@ -60,6 +61,7 @@ class PlayEventType(str, Enum):
     NO_PITCH = "no_pitch"
     PICKOFF = "pickoff"
     PITCH = "pitch"
+    STEPOFF = "stepoff"
 
 
 class PitchTypes(str, Enum):

@@ -10,7 +10,7 @@ import pandas as pd
 
 from . import utils as ut
 from .constants import (NULL_KEY, VIDEO_URL_ROOT, PlayEventType, PlayResult,
-                        Trajectory)
+                        Trajectory, MetaFields)
 from .decorators import t
 
 logger = logging.getLogger(__name__)
@@ -118,17 +118,22 @@ class Base:
 
 @dataclass
 class PlayVideo(Base):
-    id: str = field(default=FAKE_DEFAULT, init=False)
-    slug: str = field(default=FAKE_DEFAULT, init=False)
+    id: str | None = None
+    slug: str | None = None
 
     def __post_init__(self):
         self.init_helper()
+
+        if "mediaPlayback" not in self._raw:
+            return
 
         self.id = t(lambda: self._raw["mediaPlayback"][0]["id"])
         self.slug = t(lambda: self._raw["mediaPlayback"][0]["slug"])
 
     @property
     def video_url(self) -> str:
+        if not self.slug or self.slug == MetaFields.NOT_FOUND:
+            return ""
         return f"{VIDEO_URL_ROOT}{self.slug}"
 
 

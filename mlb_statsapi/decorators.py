@@ -10,7 +10,7 @@ from .constants import MetaFields
 def t(f) -> Any:
     try:
         return f()
-    except (AttributeError, KeyError) as e:
+    except (AttributeError, KeyError, TypeError) as e:
         print("MISSING ELEMENT")
         # TODO Print stack trace and more metadata
         return MetaFields.NOT_FOUND
