@@ -395,6 +395,7 @@ class Play(Base):
 
 @dataclass
 class Game(Base):
+    game_pk: int = field(init=False)
     plays: list[Play] = field(init=False)
 
     def __post_init__(self):
@@ -402,6 +403,7 @@ class Game(Base):
         base_metadata = t(
             lambda: self._metadata.add_keys(["liveData", "plays", "allPlays"])
         )
+        self.game_pk = self._raw["gamePk"]
         self.plays = t(
             lambda: [
                 Play(play, base_metadata.add_key_i(i), {**self._extra_fields})
