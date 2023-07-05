@@ -50,6 +50,7 @@ class PlayResult(str, Enum):
 
 class Trajectory(str, Enum):
     BUNT_GROUNDER = "bunt_grounder"
+    BUNT_LINE_DRIVE = "bunt_line_drive"
     FLY_BALL = "fly_ball"
     GROUND_BALL = "ground_ball"
     LINE_DRIVE = "line_drive"
