@@ -227,6 +227,12 @@ class Pitch(Base):
     @property
     def velocity(self) -> Decimal:
         return self.start_speed
+    
+    def get_match_up_values(self) -> dict[str, str]:
+        return {
+            'pitchHand': self.matchup['pitchHand']['code'],
+            'batSide': self.matchup['batSide']['code'],
+        }
 
 
 @dataclass
@@ -455,6 +461,28 @@ class Game(Base):
         return {
             k: v for p in self.plays for k, v in p.play_video_by_play_id.items()
         }
+    
+    def get_match_up_values_by_play_id(
+        self,
+        play_ids: Sequence[str] | None = None
+        ) -> dict[str, str]:
+        """
+        :param play_ids: Optional list of play ids to filter down the result
+
+        :result: Nested dictionary for plays and pitcher/batter match up values
+        """
+
+        pitches_by_play_id = self.pitches_by_play_id
+        if play_ids:
+            pitches_by_play_id = {
+                k: v for k, v in pitches_by_play_id.items() if k in play_ids
+            }
+
+        return {
+                play_id: pitch.get_match_up_values()
+                for play_id, pitch in pitches_by_play_id.items()
+            }
+
 
     def get_filtered_pitch_metrics_by_play_id(
         self,
@@ -475,15 +503,15 @@ class Game(Base):
 
         if metrics:
             return {
-                play_id: {
+                play_id: {**{
                     metric: pitch.get_flattened_value(metric)
                     for metric in metrics
-                }
+                }, **pitch.get_match_up_values()}
                 for play_id, pitch in pitches_by_play_id.items()
             }
         else:
             return {
-                play_id: pitch.flattened_values
+                play_id: {**pitch.flattened_values, **pitch.get_match_up_values()}
                 for play_id, pitch in pitches_by_play_id.items()
             }
 
@@ -524,17 +552,17 @@ class Game(Base):
 
         if metrics:
             return {
-                play_id: {
+                play_id: {**{
                     metric: (
                         swing.get_flattened_value(metric) if swing else None
                     )
                     for metric in metrics
-                }
+                }, **self.pitches_by_play_id[play_id].get_match_up_values()}
                 for play_id, swing in swings_by_play_id.items()
             }
         else:
             return {
-                play_id: swing.flattened_values if swing else {"": None}
+                play_id: {**swing.flattened_values, **self.pitches_by_play_id[play_id].get_match_up_values()} if swing else {**{"": None}, **self.pitches_by_play_id[play_id].get_match_up_values()}
                 for play_id, swing in swings_by_play_id.items()
             }
 
