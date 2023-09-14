@@ -9,7 +9,7 @@ def get_requirements():
 
 setup(
     name='mlb-statsapi',
-    version='1.0.1',
+    version='1.2.0',
     packages=['mlb_statsapi'],
     url='',
     license='',
