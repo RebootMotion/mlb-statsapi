@@ -19,6 +19,13 @@ dependencies = [
 dev = [
     "pytest",
 ]
+# The MLB Stats movement-source plugin for biomech_studio. Adds Playwright for
+# interactive Okta browser login (run `playwright install chromium` after).
+# Deliberately does NOT list biomech-studio: the plugin only ever loads inside a
+# running biomech_studio process, which provides the movement-source contract.
+biomech = [
+    "playwright>=1.49",
+]
 
 [tool.setuptools]
-packages = ["mlb_statsapi"]
+packages = ["mlb_statsapi", "mlb_statsapi.movement_source"]
