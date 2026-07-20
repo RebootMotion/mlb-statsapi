@@ -20,6 +20,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from mlb_statsapi.statsapi import MLB_STATS_BASE_URL
@@ -124,12 +125,21 @@ _READ_CAPTURED_SCRIPT = """
 """
 
 
-def login_with_browser(timeout_s: int = LOGIN_TIMEOUT_SECONDS) -> str:
+def login_with_browser(
+    timeout_s: int = LOGIN_TIMEOUT_SECONDS,
+    *,
+    on_token: Callable[[str], None] | None = None,
+) -> str:
     """Open a browser for Okta login and return the captured access token.
 
     Blocking (Playwright sync API) — callers on an event loop must dispatch to a
     worker thread.
 
+    :param on_token: Called with the token as soon as it is captured, *before*
+        the browser is torn down. Closing a headed browser can take tens of
+        seconds, during which the token is already valid — a caller that shows
+        login progress should publish it from here rather than waiting for this
+        function to return. Exceptions from the callback are logged and ignored.
     :raises LoginUnavailableError: Playwright is not installed.
     :raises RuntimeError: Login completed but no token was captured.
     :raises TimeoutError: The user did not complete login in time.
@@ -231,6 +241,14 @@ def login_with_browser(timeout_s: int = LOGIN_TIMEOUT_SECONDS) -> str:
                 break
 
             time.sleep(POLL_INTERVAL_SECONDS)
+
+        # Hand the token over before tearing down: closing a headed browser can
+        # take tens of seconds, and the caller shouldn't be blind for all of it.
+        if token and on_token is not None:
+            try:
+                on_token(token)
+            except Exception:  # a caller's callback must not fail the login
+                logger.warning("on_token callback raised; continuing", exc_info=True)
 
         browser.close()
 
