@@ -12,7 +12,7 @@ Each guid dict is one entry of
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -91,7 +91,7 @@ class GuidSplitResult:
 
     buckets: dict[str, list[str]]  # bucket label → play GUIDs
     dominant_hand: str  # neutral "left" | "right"
-    provider_extra: dict[str, Any] = field(default_factory=dict)
+    pitch_hand: str  # raw MLB pitchHand code ("R" | "L")
 
 
 def split_guids(
@@ -121,6 +121,7 @@ def split_guids(
     buckets: dict[str, list[str]] = {}
     pitch_hands: set[str] = set()
     matched = 0
+    target_pid = int(pitcher_id)
 
     for _game_id, guid_dicts in games:
         for guid_dict in guid_dicts:
@@ -131,7 +132,14 @@ def split_guids(
                 continue
 
             pid = meta_data.get("pitcher", {}).get("id")
-            if pid is None or int(pid) != int(pitcher_id):
+            if pid is None:
+                continue
+            try:
+                if int(pid) != target_pid:
+                    continue
+            except (TypeError, ValueError):
+                # Non-numeric pitcher id in an undocumented payload — skip it
+                # rather than crash the whole split.
                 continue
             matched += 1
 
@@ -164,5 +172,5 @@ def split_guids(
     return GuidSplitResult(
         buckets=buckets,
         dominant_hand=dominant_hand,
-        provider_extra={"pitch_hand": hand},
+        pitch_hand=hand,
     )

@@ -20,7 +20,7 @@ import json
 import logging
 import re
 import time
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 from mlb_statsapi.statsapi import MLB_STATS_BASE_URL
 
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 LOGIN_TIMEOUT_SECONDS = 300
 POST_LOGIN_GRACE_SECONDS = 3
+POLL_INTERVAL_SECONDS = 0.25
 
 PLAYWRIGHT_INSTALL_HINT = (
     "Browser login requires Playwright — run `pip install 'mlb-statsapi[auth]'` "
@@ -39,13 +40,29 @@ class LoginUnavailableError(Exception):
     """Interactive browser login cannot run here (e.g. Playwright not installed)."""
 
 
-# Any URL logged during login may carry the token in its fragment/query; scrub
-# the value so the token never lands in logs.
-_TOKEN_PARAM_RE = re.compile(r"(access_token|id_token|token)=[^&\s]+", re.IGNORECASE)
+# Any URL logged during login may carry a secret in its fragment/query; scrub
+# the value so tokens and OAuth authorization codes never land in logs.
+_TOKEN_PARAM_RE = re.compile(
+    r"(access_token|id_token|refresh_token|token|code)=[^&\s]+", re.IGNORECASE
+)
 
 
 def _redact_url(url: str) -> str:
     return _TOKEN_PARAM_RE.sub(r"\1=***", url)
+
+
+# Token capture is restricted to MLB-owned hosts, so a bearer header or URL
+# fragment bound for an unrelated third party (analytics, CDN, the Okta host
+# itself) that the ephemeral browser happens to contact can never be captured.
+_TRUSTED_HOST_SUFFIX = ".mlb.com"
+
+
+def _is_trusted_host(url: str) -> bool:
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return host == "mlb.com" or host.endswith(_TRUSTED_HOST_SUFFIX)
 
 
 def decode_jwt_exp(token: str) -> int | None:
@@ -80,11 +97,12 @@ def _extract_bearer(header_value: str | None) -> str | None:
 
 # Injected before any page script on every navigation. The token arrives in the
 # redirect URL fragment; some OAuth handlers immediately scrub it from the URL
-# (history.replaceState), which can beat our 0.25s poll. Stash it on a window
-# global at document-start so a later scrub can't lose it.
+# (history.replaceState), which can beat the poll. Stash it on a window global at
+# document-start so a later scrub can't lose it.
 _CAPTURE_INIT_SCRIPT = """
 () => {
   try {
+    if (!/(^|\\.)mlb\\.com$/i.test(window.location.hostname)) { return; }
     const hash = window.location.hash.slice(1);
     if (hash) {
       const t = new URLSearchParams(hash).get("access_token");
@@ -94,12 +112,14 @@ _CAPTURE_INIT_SCRIPT = """
 }
 """
 
+# Reads only the window global stashed by _CAPTURE_INIT_SCRIPT (which survives a
+# post-login history.replaceState scrub). The live-URL fragment is covered by the
+# "url-poll" path just before this runs, so there is no hash fallback here.
 _READ_CAPTURED_SCRIPT = """
 () => {
-  if (window.__mlbCapturedToken) { return window.__mlbCapturedToken; }
-  const hash = window.location.hash.slice(1);
-  if (!hash) { return null; }
-  return new URLSearchParams(hash).get("access_token");
+  const t = window.__mlbCapturedToken;
+  if (t) { try { delete window.__mlbCapturedToken; } catch (e) { /* ignore */ } }
+  return t || null;
 }
 """
 
@@ -149,7 +169,7 @@ def login_with_browser(timeout_s: int = LOGIN_TIMEOUT_SECONDS) -> str:
 
         def try_capture_from_url(url: str, source: str) -> None:
             nonlocal token
-            if token:
+            if token or not _is_trusted_host(url):
                 return
             found = _extract_token_from_url(url)
             if found:
@@ -159,6 +179,9 @@ def login_with_browser(timeout_s: int = LOGIN_TIMEOUT_SECONDS) -> str:
         def on_request(request: object) -> None:
             nonlocal token
             if token:
+                return
+            # Only trust a bearer header on a request bound for an MLB host.
+            if not _is_trusted_host(getattr(request, "url", "")):
                 return
             headers = getattr(request, "headers", {}) or {}
             found = _extract_bearer(headers.get("authorization"))
@@ -172,7 +195,7 @@ def login_with_browser(timeout_s: int = LOGIN_TIMEOUT_SECONDS) -> str:
                 return
             url = getattr(response, "url", "")
             status = getattr(response, "status", None)
-            if "/api/v1/user/info" in url and status == 200:
+            if _is_trusted_host(url) and "/api/v1/user/info" in url and status == 200:
                 login_complete_at = time.time()
                 logger.info("Login completed (200 from %s); watching for token", _redact_url(url))
 
@@ -191,14 +214,15 @@ def login_with_browser(timeout_s: int = LOGIN_TIMEOUT_SECONDS) -> str:
             if token:
                 break
 
-            try:
-                found = page.evaluate(_READ_CAPTURED_SCRIPT)
-                if found:
-                    token = found
-                    note_capture("page-eval")
-                    break
-            except Exception as err:  # page navigating/closing between reads
-                logger.debug("Token read failed (transient): %s", err)
+            if _is_trusted_host(page.url):
+                try:
+                    found = page.evaluate(_READ_CAPTURED_SCRIPT)
+                    if found:
+                        token = found
+                        note_capture("page-eval")
+                        break
+                except Exception as err:  # page navigating/closing between reads
+                    logger.debug("Token read failed (transient): %s", err)
 
             if login_complete_at is not None and time.time() - login_complete_at > (
                 POST_LOGIN_GRACE_SECONDS
@@ -206,7 +230,7 @@ def login_with_browser(timeout_s: int = LOGIN_TIMEOUT_SECONDS) -> str:
                 logger.info("Grace period elapsed after login with no token captured")
                 break
 
-            time.sleep(0.25)
+            time.sleep(POLL_INTERVAL_SECONDS)
 
         browser.close()
 

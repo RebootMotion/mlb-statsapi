@@ -67,7 +67,12 @@ class StatsApiClient:
             return None
         if response.status_code >= 400:
             raise StatsApiError(f"MLB Stats API returned {response.status_code} for {path}")
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as err:
+            # A 2xx with a non-JSON body (e.g. an HTML error/interstitial) still
+            # counts as a provider failure, not a raw decode error to the caller.
+            raise StatsApiError(f"MLB Stats API returned a non-JSON body for {path}") from err
 
     def get_person(self, person_id: int) -> dict[str, Any] | None:
         """Fetch one person by MLBAM id (public, no auth).

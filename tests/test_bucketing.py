@@ -140,7 +140,7 @@ class TestSplitGuids:
             comparison_type="windup_stretch",
         )
         assert result.dominant_hand == "left"
-        assert result.provider_extra["pitch_hand"] == "L"
+        assert result.pitch_hand == "L"
 
     def test_unknown_comparison_type(self) -> None:
         with pytest.raises(UnknownComparisonTypeError):
@@ -181,6 +181,18 @@ class TestSplitGuids:
         ]
         result = split_guids(
             [("g1", [*malformed, make_guid("a")])],
+            pitcher_id=PITCHER_ID,
+            comparison_type="windup_stretch",
+        )
+        assert result.buckets == {"windup": ["a"]}
+
+    def test_non_numeric_pitcher_id_skipped(self) -> None:
+        bad = {
+            "guid": "x",
+            "metaData": {"pitcher": {"id": "not-a-number"}, "stat": {"play": {"count": {}}}},
+        }
+        result = split_guids(
+            [("g1", [bad, make_guid("a")])],
             pitcher_id=PITCHER_ID,
             comparison_type="windup_stretch",
         )

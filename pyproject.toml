@@ -7,7 +7,7 @@ name = "mlb-statsapi"
 version = "1.2.0"
 description = "Wrapper to access stats API data from MLB"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 dependencies = [
     "pandas",

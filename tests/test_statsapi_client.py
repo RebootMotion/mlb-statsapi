@@ -16,11 +16,14 @@ from mlb_statsapi.statsapi import StatsApiAuthError, StatsApiClient, StatsApiErr
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, payload: Any = None) -> None:
+    def __init__(self, status_code: int, payload: Any = None, *, json_raises: bool = False) -> None:
         self.status_code = status_code
         self._payload = payload
+        self._json_raises = json_raises
 
     def json(self) -> Any:
+        if self._json_raises:
+            raise ValueError("No JSON object could be decoded")
         return self._payload
 
 
@@ -58,6 +61,11 @@ class TestStatusHandling:
 
     def test_transport_error_raises_error(self) -> None:
         client = client_with_response(requests.ConnectionError("boom"))
+        with pytest.raises(StatsApiError):
+            client.get_schedule()
+
+    def test_non_json_2xx_raises_error(self) -> None:
+        client = client_with_response(FakeResponse(200, json_raises=True))
         with pytest.raises(StatsApiError):
             client.get_schedule()
 

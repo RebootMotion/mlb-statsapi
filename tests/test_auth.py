@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import json
 
-from mlb_statsapi.auth import _redact_url, decode_jwt_exp
+from mlb_statsapi.auth import _is_trusted_host, _redact_url, decode_jwt_exp
 
 
 def make_jwt(exp: int) -> str:
@@ -34,6 +34,30 @@ class TestRedactUrl:
         # Non-sensitive params are left intact for debugging.
         assert "expires_in=3600" in redacted
 
+    def test_redacts_oauth_code_and_refresh_token(self) -> None:
+        url = "https://statsapi.mlb.com/cb?code=authz-code-secret&refresh_token=rt-secret&state=x"
+        redacted = _redact_url(url)
+        assert "authz-code-secret" not in redacted
+        assert "rt-secret" not in redacted
+        assert "code=***" in redacted
+        assert "refresh_token=***" in redacted
+        assert "state=x" in redacted
+
     def test_leaves_plain_urls_untouched(self) -> None:
         url = "https://statsapi.mlb.com/api/v1/user/info"
         assert _redact_url(url) == url
+
+
+class TestTrustedHost:
+    def test_accepts_mlb_hosts(self) -> None:
+        assert _is_trusted_host("https://statsapi.mlb.com/api/v1/user/info")
+        assert _is_trusted_host("https://mlb.com/anything")
+        assert _is_trusted_host("https://ids.mlb.com/oauth2/authorize#access_token=x")
+
+    def test_rejects_foreign_and_lookalike_hosts(self) -> None:
+        assert not _is_trusted_host("https://mlb.okta.com/#access_token=x")
+        assert not _is_trusted_host("https://evil.com/#access_token=x")
+        # A suffix attack must not slip through the endswith check.
+        assert not _is_trusted_host("https://notmlb.com/#access_token=x")
+        assert not _is_trusted_host("https://mlb.com.evil.com/#access_token=x")
+        assert not _is_trusted_host("not a url")
