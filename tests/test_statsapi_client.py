@@ -1,7 +1,7 @@
-"""Tests for the neutral StatsApiClient.
+"""Tests for StatsApiClient.
 
-Self-contained: they mock ``requests`` and never touch the network or
-biomech_studio, so they pass with only ``mlb-statsapi[dev]`` installed.
+Self-contained: they mock ``requests`` and never touch the network, so they
+pass with only ``mlb-statsapi[dev]`` installed.
 """
 
 from __future__ import annotations
@@ -39,6 +39,11 @@ def client_with_response(response: FakeResponse | Exception) -> StatsApiClient:
     return client
 
 
+def sent_params(client: StatsApiClient) -> dict[str, Any]:
+    """The query params of the last request the client issued."""
+    return client._session.get.call_args.kwargs["params"]
+
+
 class TestStatusHandling:
     def test_401_raises_auth_error(self) -> None:
         client = client_with_response(FakeResponse(401))
@@ -70,8 +75,26 @@ class TestStatusHandling:
             client.get_schedule()
 
 
-class TestResponseShapes:
-    def test_get_person_unwraps_first(self) -> None:
+class TestGetEscapeHatch:
+    def test_get_reaches_an_unwrapped_endpoint(self) -> None:
+        client = client_with_response(FakeResponse(200, {"teams": [{"id": 147}]}))
+        assert client.get("/teams", params={"sportId": 1}) == {"teams": [{"id": 147}]}
+        assert client._session.get.call_args.args[0].endswith("/teams")
+        assert sent_params(client) == {"sportId": 1}
+
+    def test_get_sends_bearer_when_token_given(self) -> None:
+        client = client_with_response(FakeResponse(200, {}))
+        client.get("/anything", access_token="tok")
+        assert client._session.get.call_args.kwargs["headers"] == {"Authorization": "Bearer tok"}
+
+    def test_get_no_auth_header_without_token(self) -> None:
+        client = client_with_response(FakeResponse(200, {}))
+        client.get("/anything")
+        assert client._session.get.call_args.kwargs["headers"] is None
+
+
+class TestEndpointMethods:
+    def test_get_person_unwraps_single_person_envelope(self) -> None:
         client = client_with_response(FakeResponse(200, {"people": [{"id": 1}]}))
         assert client.get_person(1) == {"id": 1}
 
@@ -80,6 +103,76 @@ class TestResponseShapes:
         assert client_with_response(FakeResponse(200, {"people": []})).get_person(1) is None
         assert client_with_response(FakeResponse(200, None)).get_person(1) is None
 
+    def test_get_person_stats_returns_raw_entries(self) -> None:
+        payload = {
+            "stats": [
+                {"group": {"displayName": "pitching"}, "splits": [{"date": "2026-06-01"}]},
+                {"group": {"displayName": "hitting"}, "splits": [{"date": "2026-06-02"}]},
+            ]
+        }
+        client = client_with_response(FakeResponse(200, payload))
+        entries = client.get_person_stats(660271, stats="gameLog", group="pitching")
+        # Groups stay distinguishable — nothing is merged away.
+        assert [e["group"]["displayName"] for e in entries] == ["pitching", "hitting"]
+
+    def test_get_person_stats_sends_optional_params_only_when_given(self) -> None:
+        client = client_with_response(FakeResponse(200, {"stats": []}))
+        client.get_person_stats(1, stats="season", group="hitting")
+        assert sent_params(client) == {"stats": "season", "group": "hitting"}
+
+        client = client_with_response(FakeResponse(200, {"stats": []}))
+        client.get_person_stats(1, stats="gameLog", group="pitching", season=2026, sport_id=11)
+        assert sent_params(client) == {
+            "stats": "gameLog",
+            "group": "pitching",
+            "season": 2026,
+            "sportId": 11,
+        }
+
+    def test_get_person_stats_empty_body(self) -> None:
+        client = client_with_response(FakeResponse(200, {}))
+        assert client.get_person_stats(1, stats="gameLog", group="pitching") == []
+
+    def test_get_schedule_returns_raw_payload_with_dates(self) -> None:
+        payload = {"dates": [{"date": "2026-06-01", "games": [{"gamePk": 1}]}]}
+        client = client_with_response(FakeResponse(200, payload))
+        # Per-date grouping is preserved, unlike get_scheduled_games.
+        assert client.get_schedule(start_date="2026-06-01") == payload
+
+    def test_get_schedule_defaults_to_mlb_but_accepts_a_level(self) -> None:
+        client = client_with_response(FakeResponse(200, {}))
+        client.get_schedule()
+        assert sent_params(client) == {"sportId": 1}
+
+        client = client_with_response(FakeResponse(200, {}))
+        client.get_schedule(start_date="2026-06-01", end_date="2026-06-02", sport_id=11)
+        assert sent_params(client) == {
+            "sportId": 11,
+            "startDate": "2026-06-01",
+            "endDate": "2026-06-02",
+        }
+
+    def test_get_boxscore_returns_raw_payload(self) -> None:
+        payload = {"teams": {"away": {"batters": [1]}, "home": {}}}
+        client = client_with_response(FakeResponse(200, payload))
+        assert client.get_boxscore(745123) == payload
+
+    def test_guids_non_list_raises(self) -> None:
+        client = client_with_response(FakeResponse(200, {"unexpected": True}))
+        with pytest.raises(StatsApiError):
+            client.get_game_guids(1, access_token="tok")
+
+    def test_guids_hydrate_is_overridable(self) -> None:
+        client = client_with_response(FakeResponse(200, []))
+        client.get_game_guids(1, access_token="tok")
+        assert sent_params(client) == {"hydrate": "analytics(metaData)"}
+
+        client = client_with_response(FakeResponse(200, []))
+        client.get_game_guids(1, access_token="tok", hydrate="none")
+        assert sent_params(client) == {"hydrate": "none"}
+
+
+class TestDerivedViews:
     def test_game_log_flattens_splits(self) -> None:
         payload = {
             "stats": [
@@ -89,14 +182,14 @@ class TestResponseShapes:
             ]
         }
         client = client_with_response(FakeResponse(200, payload))
-        splits = client.get_person_game_log(660271, season=2026)
+        splits = client.get_person_game_log(660271, season=2026, group="pitching")
         assert [s["date"] for s in splits] == ["2026-06-01", "2026-06-05", "2026-06-09"]
 
     def test_game_log_empty_body(self) -> None:
         client = client_with_response(FakeResponse(200, {}))
-        assert client.get_person_game_log(660271, season=2026) == []
+        assert client.get_person_game_log(660271, season=2026, group="pitching") == []
 
-    def test_schedule_flattens_dates(self) -> None:
+    def test_scheduled_games_flattens_dates(self) -> None:
         payload = {
             "dates": [
                 {"games": [{"gamePk": 1}, {"gamePk": 2}]},
@@ -104,13 +197,12 @@ class TestResponseShapes:
             ]
         }
         client = client_with_response(FakeResponse(200, payload))
-        games = client.get_schedule(start_date="2026-06-01", end_date="2026-06-02")
+        games = client.get_scheduled_games(start_date="2026-06-01", end_date="2026-06-02")
         assert [g["gamePk"] for g in games] == [1, 2, 3]
 
-    def test_guids_non_list_raises(self) -> None:
-        client = client_with_response(FakeResponse(200, {"unexpected": True}))
-        with pytest.raises(StatsApiError):
-            client.get_game_guids(1, access_token="tok")
+    def test_scheduled_games_empty_body(self) -> None:
+        client = client_with_response(FakeResponse(200, {}))
+        assert client.get_scheduled_games() == []
 
     def test_get_game_pitchers_shapes_boxscore(self) -> None:
         payload = {
@@ -126,3 +218,7 @@ class TestResponseShapes:
         client = client_with_response(FakeResponse(200, payload))
         pitchers = client.get_game_pitchers(745123)
         assert pitchers == [{"pitcher_id": 660271, "name": "Shohei Ohtani", "team": "Mets"}]
+
+    def test_get_game_pitchers_empty_body(self) -> None:
+        client = client_with_response(FakeResponse(200, {}))
+        assert client.get_game_pitchers(745123) == []

@@ -11,15 +11,32 @@ To see all fields available on the raw game feed data, please view docs/game_dat
 
 `mlb_statsapi.StatsApiClient` is a small synchronous wrapper over the Stats API
 returning raw JSON dicts, with `requests`-level retries and errors surfaced as
-`StatsApiError` / `StatsApiAuthError`:
+`StatsApiError` / `StatsApiAuthError`.
+
+The surface is split in two, so a convenience shortcut is never the only way to
+reach the data:
+
+| Kind | Methods | Returns |
+|------|---------|---------|
+| **Endpoint** | `get_person`, `get_person_stats`, `get_schedule`, `get_boxscore`, `get_game_guids` | what the endpoint returns — nothing dropped |
+| **Derived** | `get_person_game_log`, `get_scheduled_games`, `get_game_pitchers` | a reshaped view layered on the endpoint methods |
 
 ```python
 from mlb_statsapi import StatsApiClient
 
 client = StatsApiClient()
-person = client.get_person(660271)              # public
-games = client.get_schedule(start_date="2026-06-01", end_date="2026-06-02")
+
+person = client.get_person(660271)                       # public
+payload = client.get_schedule(start_date="2026-06-01")   # raw, keeps dates[] grouping
+games = client.get_scheduled_games(start_date="2026-06-01", sport_id=11)  # flat, Triple-A
+log = client.get_person_game_log(660271, season=2026, group="pitching")
 guids = client.get_game_guids(745123, access_token="<okta bearer>")  # auth required
+```
+
+Anything not wrapped yet is reachable through `get()`:
+
+```python
+client.get("/teams", params={"sportId": 1})
 ```
 
 
