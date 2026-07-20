@@ -51,19 +51,31 @@ def _batter_hand_bucket(play: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _two_strike_count_bucket(play: dict[str, Any]) -> str:
-    return "two_strikes" if play.get("count", {}).get("strikes") == 2 else "other_counts"
-
-
-def _inning_range_bucket(play: dict[str, Any]) -> str | None:
-    inning = play.get("count", {}).get("inning")
-    if inning is None:
+def _count_bucket(play: dict[str, Any]) -> str | None:
+    count = play.get("count", {})
+    balls, strikes = count.get("balls"), count.get("strikes")
+    if balls is None or strikes is None:
         return None
-    if inning <= 3:
-        return "innings_1_to_3"
-    if inning <= 6:
-        return "innings_4_to_6"
-    return "innings_7_plus"
+    return f"{balls}-{strikes}"
+
+
+def _inning_bucket(play: dict[str, Any]) -> str | None:
+    inning = play.get("count", {}).get("inning")
+    return None if inning is None else str(inning)
+
+
+def _count_sort_key(label: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in label.split("-"))
+    except ValueError:  # unexpected label shape sorts last, rather than raising
+        return (99, 99)
+
+
+def _inning_sort_key(label: str) -> tuple[int, ...]:
+    try:
+        return (int(label),)
+    except ValueError:
+        return (99,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,16 +83,23 @@ class ComparisonType:
     id: str
     label: str
     bucket_fn: BucketFn
+    # Orders buckets for display. Labels are strings, so numeric dimensions need
+    # their own key ("10" would otherwise sort before "2"). Defaults to
+    # alphabetical, which suits the categorical dimensions.
+    sort_key: Callable[[str], Any] | None = None
 
 
+# Dimensions are deliberately fine-grained: callers group the values they want
+# (e.g. several pitch types into one segment) rather than being handed fixed
+# bands.
 COMPARISON_TYPES: dict[str, ComparisonType] = {
     ct.id: ct
     for ct in (
         ComparisonType("windup_stretch", "Windup vs stretch", _windup_stretch_bucket),
         ComparisonType("pitch_type", "Pitch type", _pitch_type_bucket),
         ComparisonType("batter_hand", "Batter hand", _batter_hand_bucket),
-        ComparisonType("two_strike_count", "Two-strike count", _two_strike_count_bucket),
-        ComparisonType("inning_range", "Inning range", _inning_range_bucket),
+        ComparisonType("count", "Count (balls-strikes)", _count_bucket, _count_sort_key),
+        ComparisonType("inning", "Inning", _inning_bucket, _inning_sort_key),
     )
 }
 
@@ -169,8 +188,11 @@ def split_guids(
             f"Unsupported or missing pitch hand {hand!r} for pitcher {pitcher_id}"
         )
 
+    # Buckets accumulate in play order, which is meaningless to a reader picking
+    # values to group. Order them by the dimension's own sense of sequence.
+    ordered = sorted(buckets, key=ct.sort_key) if ct.sort_key else sorted(buckets)
     return GuidSplitResult(
-        buckets=buckets,
+        buckets={label: buckets[label] for label in ordered},
         dominant_hand=dominant_hand,
         pitch_hand=hand,
     )

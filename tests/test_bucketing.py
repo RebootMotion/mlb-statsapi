@@ -23,6 +23,7 @@ def make_guid(
     *,
     pitcher_id: int = PITCHER_ID,
     pitch_hand: str | None = "R",
+    balls: int = 0,
     strikes: int = 0,
     inning: int = 1,
     runners: bool = False,
@@ -31,6 +32,7 @@ def make_guid(
 ) -> dict[str, Any]:
     play: dict[str, Any] = {
         "count": {
+            "balls": balls,
             "strikes": strikes,
             "inning": inning,
             "runnerOn1b": runners,
@@ -85,32 +87,66 @@ class TestBucketFunctions:
         )
         assert result.buckets == {"L": ["a"], "R": ["b"]}
 
-    def test_two_strike_count(self) -> None:
+    def test_count_uses_balls_strikes(self) -> None:
         result = split_guids(
-            [("g1", [make_guid("a", strikes=2), make_guid("b", strikes=1)])],
+            [
+                (
+                    "g1",
+                    [
+                        make_guid("a", balls=1, strikes=2),
+                        make_guid("b", balls=0, strikes=0),
+                        make_guid("c", balls=1, strikes=2),
+                    ],
+                )
+            ],
             pitcher_id=PITCHER_ID,
-            comparison_type="two_strike_count",
+            comparison_type="count",
         )
-        assert result.buckets == {"two_strikes": ["a"], "other_counts": ["b"]}
+        assert result.buckets == {"0-0": ["b"], "1-2": ["a", "c"]}
 
-    @pytest.mark.parametrize(
-        ("inning", "bucket"),
-        [
-            (1, "innings_1_to_3"),
-            (3, "innings_1_to_3"),
-            (4, "innings_4_to_6"),
-            (6, "innings_4_to_6"),
-            (7, "innings_7_plus"),
-            (9, "innings_7_plus"),
-        ],
-    )
-    def test_inning_range_boundaries(self, inning: int, bucket: str) -> None:
+    def test_count_ordered_by_balls_then_strikes(self) -> None:
+        result = split_guids(
+            [
+                (
+                    "g1",
+                    [
+                        make_guid("a", balls=3, strikes=2),
+                        make_guid("b", balls=0, strikes=1),
+                        make_guid("c", balls=1, strikes=0),
+                    ],
+                )
+            ],
+            pitcher_id=PITCHER_ID,
+            comparison_type="count",
+        )
+        assert list(result.buckets) == ["0-1", "1-0", "3-2"]
+
+    @pytest.mark.parametrize("inning", [1, 4, 7, 12])
+    def test_inning_uses_exact_inning(self, inning: int) -> None:
         result = split_guids(
             [("g1", [make_guid("a", inning=inning)])],
             pitcher_id=PITCHER_ID,
-            comparison_type="inning_range",
+            comparison_type="inning",
         )
-        assert result.buckets == {bucket: ["a"]}
+        assert result.buckets == {str(inning): ["a"]}
+
+    def test_innings_sort_numerically_not_lexically(self) -> None:
+        result = split_guids(
+            [
+                (
+                    "g1",
+                    [
+                        make_guid("a", inning=10),
+                        make_guid("b", inning=2),
+                        make_guid("c", inning=9),
+                    ],
+                )
+            ],
+            pitcher_id=PITCHER_ID,
+            comparison_type="inning",
+        )
+        # "10" must not sort before "2".
+        assert list(result.buckets) == ["2", "9", "10"]
 
 
 class TestSplitGuids:
@@ -203,7 +239,7 @@ class TestSplitGuids:
             "windup_stretch",
             "pitch_type",
             "batter_hand",
-            "two_strike_count",
-            "inning_range",
+            "count",
+            "inning",
         }
         assert all(ct.label for ct in COMPARISON_TYPES.values())
