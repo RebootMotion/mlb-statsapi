@@ -42,8 +42,18 @@ def _windup_stretch_bucket(play: dict[str, Any]) -> str:
 
 
 def _pitch_type_bucket(play: dict[str, Any]) -> str | None:
-    value = play.get("details", {}).get("type", {}).get("description")
-    return value if isinstance(value, str) else None
+    """MLB's short pitch code ("FF", "SL", "CH").
+
+    The code is the standard identifier and keeps labels compact; the long
+    ``description`` ("Four-Seam Fastball") is the fallback for a payload that
+    omits it.
+    """
+    pitch_type = play.get("details", {}).get("type", {})
+    for key in ("code", "description"):
+        value = pitch_type.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _batter_hand_bucket(play: dict[str, Any]) -> str | None:

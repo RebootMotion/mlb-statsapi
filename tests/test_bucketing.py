@@ -28,6 +28,7 @@ def make_guid(
     inning: int = 1,
     runners: bool = False,
     pitch_type: str | None = "Four-Seam Fastball",
+    pitch_code: str | None = "FF",
     bat_side: str | None = "L",
 ) -> dict[str, Any]:
     play: dict[str, Any] = {
@@ -43,8 +44,13 @@ def make_guid(
     }
     if pitch_hand is not None:
         play["details"]["pitchHand"] = {"code": pitch_hand}
-    if pitch_type is not None:
-        play["details"]["type"] = {"description": pitch_type}
+    if pitch_type is not None or pitch_code is not None:
+        type_obj: dict[str, Any] = {}
+        if pitch_code is not None:
+            type_obj["code"] = pitch_code
+        if pitch_type is not None:
+            type_obj["description"] = pitch_type
+        play["details"]["type"] = type_obj
     if bat_side is not None:
         play["details"]["batSide"] = {"code": bat_side}
     return {
@@ -62,22 +68,31 @@ class TestBucketFunctions:
         )
         assert result.buckets == {"windup": ["a"], "stretch": ["b"]}
 
-    def test_pitch_type(self) -> None:
+    def test_pitch_type_uses_short_code(self) -> None:
         result = split_guids(
             [
                 (
                     "g1",
                     [
-                        make_guid("a", pitch_type="Four-Seam Fastball"),
-                        make_guid("b", pitch_type="Curveball"),
-                        make_guid("c", pitch_type=None),  # untyped play skipped, not crashed
+                        make_guid("a", pitch_code="FF"),
+                        make_guid("b", pitch_code="CU"),
+                        # untyped play skipped, not crashed
+                        make_guid("c", pitch_code=None, pitch_type=None),
                     ],
                 )
             ],
             pitcher_id=PITCHER_ID,
             comparison_type="pitch_type",
         )
-        assert result.buckets == {"Four-Seam Fastball": ["a"], "Curveball": ["b"]}
+        assert result.buckets == {"CU": ["b"], "FF": ["a"]}
+
+    def test_pitch_type_falls_back_to_description(self) -> None:
+        result = split_guids(
+            [("g1", [make_guid("a", pitch_code=None, pitch_type="Four-Seam Fastball")])],
+            pitcher_id=PITCHER_ID,
+            comparison_type="pitch_type",
+        )
+        assert result.buckets == {"Four-Seam Fastball": ["a"]}
 
     def test_batter_hand(self) -> None:
         result = split_guids(
