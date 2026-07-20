@@ -10,8 +10,8 @@ To see all fields available on the raw game feed data, please view docs/game_dat
 ## Stats API client (`StatsApiClient`)
 
 `mlb_statsapi.StatsApiClient` is a small synchronous wrapper over the Stats API
-returning raw JSON dicts, with `requests`-level retries and library-local
-errors (`StatsApiError` / `StatsApiAuthError`):
+returning raw JSON dicts, with `requests`-level retries and errors surfaced as
+`StatsApiError` / `StatsApiAuthError`:
 
 ```python
 from mlb_statsapi import StatsApiClient
@@ -23,18 +23,36 @@ guids = client.get_game_guids(745123, access_token="<okta bearer>")  # auth requ
 ```
 
 
-## Biomech Studio movement-source plugin (optional)
+## Okta login (`mlb_statsapi.auth`)
 
-The `[biomech]` extra ships `mlb_statsapi.movement_source.MlbStatsMovementSource`,
-a movement-source plugin for [Biomech Studio](https://github.com/RebootMotion/reboot-motion-capture).
-It is loaded by a running Biomech Studio process via `BIOMECH_MOVEMENT_SOURCES`
-and imports the movement-source contract from that host, so it is **not**
-importable standalone. Install it alongside the app and run
-`playwright install chromium` for interactive Okta login:
+Endpoints like the play-guids endpoint need an MLB-org bearer token.
+`login_with_browser()` opens a browser for Okta sign-in and returns the captured
+token (held in memory by the caller — not written to disk). It needs the `[auth]`
+extra's Playwright:
 
 ```bash
-pip install -e '.[biomech]'
+pip install '.[auth]'
 playwright install chromium
+```
+
+```python
+from mlb_statsapi.auth import login_with_browser
+token = login_with_browser()   # blocking; run off the event loop in async code
+```
+
+
+## Pitch bucketing (`mlb_statsapi.bucketing`)
+
+`split_guids()` groups a pitcher's play GUIDs (from `get_game_guids`) into named
+buckets by a comparison type — windup vs stretch, pitch type, batter hand,
+two-strike count, or inning range:
+
+```python
+from mlb_statsapi.bucketing import split_guids, COMPARISON_TYPES
+
+result = split_guids(games, pitcher_id=660271, comparison_type="windup_stretch")
+result.buckets          # {"windup": [...guids], "stretch": [...guids]}
+result.dominant_hand    # "left" | "right"
 ```
 
 

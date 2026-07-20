@@ -1,14 +1,15 @@
-"""Okta browser login for the MLB Stats API.
+"""Interactive Okta browser login for the MLB Stats API.
 
-Captured tokens are held in memory by the caller only — never written to disk.
-
-The login opens a real Chrome/Chromium window (Playwright sync API — must run
-off the event loop) pointed at the Stats API; the user authenticates on MLB's
+Some Stats API endpoints (e.g. the play-guids endpoint) require an MLB-org
+bearer token. :func:`login_with_browser` opens a real Chrome/Chromium window
+(Playwright sync API) pointed at the Stats API; the user authenticates on MLB's
 Okta page and the bearer token is captured from the redirect URL fragment or
-request headers. The browser context is ephemeral: no access to the user's
-own profile/cookies, and nothing persists after close.
+request headers. The browser context is ephemeral — no access to the user's own
+profile/cookies, and nothing persists after close. The captured token is
+returned to the caller and never written to disk by this module.
 
-Part of the optional ``[biomech]`` movement-source plugin.
+Playwright is an optional dependency (the ``[auth]`` extra); it is imported
+lazily so this module imports fine without it.
 """
 
 from __future__ import annotations
@@ -21,14 +22,22 @@ import re
 import time
 from urllib.parse import parse_qs
 
-from biomech_studio.services.exceptions import InteractiveLoginUnavailableError
-
 from mlb_statsapi.statsapi import MLB_STATS_BASE_URL
 
 logger = logging.getLogger(__name__)
 
 LOGIN_TIMEOUT_SECONDS = 300
 POST_LOGIN_GRACE_SECONDS = 3
+
+PLAYWRIGHT_INSTALL_HINT = (
+    "Browser login requires Playwright — run `pip install 'mlb-statsapi[auth]'` "
+    "and `playwright install chromium`, or supply an access token another way"
+)
+
+
+class LoginUnavailableError(Exception):
+    """Interactive browser login cannot run here (e.g. Playwright not installed)."""
+
 
 # Any URL logged during login may carry the token in its fragment/query; scrub
 # the value so the token never lands in logs.
@@ -37,13 +46,6 @@ _TOKEN_PARAM_RE = re.compile(r"(access_token|id_token|token)=[^&\s]+", re.IGNORE
 
 def _redact_url(url: str) -> str:
     return _TOKEN_PARAM_RE.sub(r"\1=***", url)
-
-
-PLAYWRIGHT_INSTALL_HINT = (
-    "Browser login requires the optional [biomech] extra — run "
-    "`pip install 'mlb-statsapi[biomech]'` and `playwright install chromium`, "
-    "or paste an access token instead"
-)
 
 
 def decode_jwt_exp(token: str) -> int | None:
@@ -105,16 +107,17 @@ _READ_CAPTURED_SCRIPT = """
 def login_with_browser(timeout_s: int = LOGIN_TIMEOUT_SECONDS) -> str:
     """Open a browser for Okta login and return the captured access token.
 
-    Blocking (Playwright sync API) — callers must dispatch to a worker thread.
+    Blocking (Playwright sync API) — callers on an event loop must dispatch to a
+    worker thread.
 
-    :raises InteractiveLoginUnavailableError: Playwright is not installed.
+    :raises LoginUnavailableError: Playwright is not installed.
     :raises RuntimeError: Login completed but no token was captured.
     :raises TimeoutError: The user did not complete login in time.
     """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as err:
-        raise InteractiveLoginUnavailableError(PLAYWRIGHT_INSTALL_HINT) from err
+        raise LoginUnavailableError(PLAYWRIGHT_INSTALL_HINT) from err
 
     login_url = f"{MLB_STATS_BASE_URL}/user/info"
     token: str | None = None
@@ -212,10 +215,10 @@ def login_with_browser(timeout_s: int = LOGIN_TIMEOUT_SECONDS) -> str:
             logger.warning("Login succeeded in browser but no token was captured")
             raise RuntimeError(
                 "Sign-in succeeded in the browser but no API token was captured. "
-                "Use 'Login with Okta' (not username/password), or paste a token manually."
+                "Use 'Login with Okta' (not username/password), or supply a token manually."
             )
         logger.warning("Login timed out after %ss with no completion detected", timeout_s)
-        raise TimeoutError("Sign-in timed out. Try again or paste a token manually.")
+        raise TimeoutError("Sign-in timed out. Try again or supply a token manually.")
 
     logger.info("MLB Stats browser login succeeded (token via %s)", captured_via)
     return token

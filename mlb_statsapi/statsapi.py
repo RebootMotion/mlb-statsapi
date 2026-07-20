@@ -5,9 +5,7 @@ requires an MLB-org Okta bearer token; schedule, boxscore, person, and gameLog
 are public. Payload shapes are not publicly documented, so callers harden
 access with ``.get()``.
 
-Errors are surfaced as library-local exceptions (:class:`StatsApiError`,
-:class:`StatsApiAuthError`) so this module stays free of any consumer's
-domain types.
+Errors are surfaced as :class:`StatsApiError` / :class:`StatsApiAuthError`.
 """
 
 from __future__ import annotations
@@ -39,7 +37,7 @@ class StatsApiClient:
     def __init__(self, base_url: str = MLB_STATS_BASE_URL) -> None:
         self._base_url = base_url.rstrip("/")
         # A Session opens no connections until first use, so eager creation is
-        # cheap even when this source is registered but never queried.
+        # cheap even for a client that is constructed but never queried.
         self._session = requests.Session()
         adapter = HTTPAdapter(max_retries=_RETRY)
         self._session.mount("http://", adapter)

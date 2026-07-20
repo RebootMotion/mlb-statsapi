@@ -8,6 +8,5 @@ from .statsapi import (
     StatsApiError,
 )
 
-# The mlb_statsapi.movement_source submodule is intentionally NOT imported here:
-# it is optional (needs the [biomech] extra + a Playwright install) and only
-# usable inside a running biomech_studio process.
+# Okta browser login (mlb_statsapi.auth) and pitch bucketing (mlb_statsapi.bucketing)
+# are accessed via their submodules to keep the optional Playwright import lazy.

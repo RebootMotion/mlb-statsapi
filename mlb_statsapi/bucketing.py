@@ -1,15 +1,12 @@
-"""Pure pitch-bucketing logic over MLB Stats API guid payloads.
+"""Group a pitcher's play GUIDs into named buckets.
 
-Operates on already-fetched guid dicts (no I/O) so it is fully unit-testable,
-with ``.get()``-hardened access throughout (live payload shapes are not
-publicly documented).
+Pure, I/O-free logic over already-fetched guid dicts (so it is fully
+unit-testable), with ``.get()``-hardened access throughout — live payload
+shapes are not publicly documented.
 
-Each guid dict is one entry of ``GET /game/{game_pk}/guids?hydrate=analytics(metaData)``:
+Each guid dict is one entry of
+``StatsApiClient.get_game_guids`` / ``GET /game/{game_pk}/guids?hydrate=analytics(metaData)``:
 ``{"guid": str, "metaData": {"pitcher": {"id": int}, "stat": {"play": {...}}}}``.
-
-Part of the optional ``[biomech]`` movement-source plugin: it raises the
-generic movement-source exceptions defined by the host so the biomech_studio
-router can map them without provider knowledge.
 """
 
 from __future__ import annotations
@@ -18,15 +15,22 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from biomech_studio.services.exceptions import (
-    DominanceNotDeterminedError,
-    NoMatchingMovementsError,
-    UnknownComparisonTypeError,
-)
+
+class UnknownComparisonTypeError(ValueError):
+    """The requested comparison_type is not a key in :data:`COMPARISON_TYPES`."""
+
+
+class NoMatchingPitchesError(Exception):
+    """No plays in the supplied games matched the requested pitcher."""
+
+
+class PitchHandNotDeterminedError(Exception):
+    """Pitch hand is missing, unsupported, or conflicting across the games."""
+
 
 RUNNER_ON_BASE_FIELDS = ("runnerOn1b", "runnerOn2b", "runnerOn3b")
 
-# MLB pitchHand code → neutral dominance value used across the app
+# MLB pitchHand code → neutral handedness value
 PITCH_HAND_TO_DOMINANT_HAND = {"R": "right", "L": "left"}
 
 BucketFn = Callable[[dict[str, Any]], str | None]
@@ -85,7 +89,7 @@ COMPARISON_TYPES: dict[str, ComparisonType] = {
 class GuidSplitResult:
     """Buckets of play GUIDs for one pitcher across the supplied games."""
 
-    buckets: dict[str, list[str]]
+    buckets: dict[str, list[str]]  # bucket label → play GUIDs
     dominant_hand: str  # neutral "left" | "right"
     provider_extra: dict[str, Any] = field(default_factory=dict)
 
@@ -98,24 +102,27 @@ def split_guids(
 ) -> GuidSplitResult:
     """Bucket one pitcher's play GUIDs across games by comparison type.
 
-    :param games: ``(event_id, guid_dicts)`` per game, as fetched from the
+    :param games: ``(game_id, guid_dicts)`` per game, as fetched from the
         Stats API guids endpoint.
     :param pitcher_id: MLB person id; plays by other pitchers are skipped.
     :param comparison_type: Key into :data:`COMPARISON_TYPES`.
     :raises UnknownComparisonTypeError: Unsupported ``comparison_type``.
-    :raises NoMatchingMovementsError: No plays matched the pitcher.
-    :raises DominanceNotDeterminedError: Pitch hand missing, unsupported, or
+    :raises NoMatchingPitchesError: No plays matched the pitcher.
+    :raises PitchHandNotDeterminedError: Pitch hand missing, unsupported, or
         conflicting across the selected games.
     """
     ct = COMPARISON_TYPES.get(comparison_type)
     if ct is None:
-        raise UnknownComparisonTypeError(comparison_type)
+        raise UnknownComparisonTypeError(
+            f"Unknown comparison type '{comparison_type}'; expected one of "
+            f"{sorted(COMPARISON_TYPES)}"
+        )
 
     buckets: dict[str, list[str]] = {}
     pitch_hands: set[str] = set()
     matched = 0
 
-    for _event_id, guid_dicts in games:
+    for _game_id, guid_dicts in games:
         for guid_dict in guid_dicts:
             guid = guid_dict.get("guid")
             meta_data = guid_dict.get("metaData") or {}
@@ -138,19 +145,19 @@ def split_guids(
             buckets.setdefault(bucket, []).append(guid)
 
     if matched == 0:
-        raise NoMatchingMovementsError(
+        raise NoMatchingPitchesError(
             f"No pitches found for pitcher {pitcher_id} in the selected games — "
             "verify the pitcher appeared in those games"
         )
     if len(pitch_hands) > 1:
-        raise DominanceNotDeterminedError(
+        raise PitchHandNotDeterminedError(
             f"Selected games mix pitch hands {sorted(pitch_hands)} for pitcher "
             f"{pitcher_id} — narrow the selection to games with a single hand"
         )
     hand = next(iter(pitch_hands), None)
     dominant_hand = PITCH_HAND_TO_DOMINANT_HAND.get(hand or "")
     if dominant_hand is None:
-        raise DominanceNotDeterminedError(
+        raise PitchHandNotDeterminedError(
             f"Unsupported or missing pitch hand {hand!r} for pitcher {pitcher_id}"
         )
 
