@@ -9,29 +9,29 @@ def explore_object(data: Any, path: str, print_val: bool = False) -> set[Any]:
         if print_val:
             print(data)
 
-        if type(data) == list:
+        if isinstance(data, list):
             return {"LIST"}
-        elif type(data) == dict:
+        elif isinstance(data, dict):
             return set(data.keys())
         else:
             return {data}
     elif path[:3] == ".[]":
         res = set()
-        assert (
-            type(data) == list
+        assert isinstance(
+            data, list
         ), f"Unexpected type on path {path} of {type(data)}"
         for elt in data:
             res |= explore_object(elt, path[3:])
         return res
-    elif re.search("^\.\[[0-9]+\]", path):  # Match a specific index
-        assert (
-            type(data) == list
+    elif re.search(r"^\.\[[0-9]+\]", path):  # Match a specific index
+        assert isinstance(
+            data, list
         ), f"Unexpected type on path {path} of {type(data)}"
         i = int(path[2 : path.find("]")])
         return explore_object(data[i], path[path.find("]") + 1 :])
     elif path[0] == ".":
-        assert (
-            type(data) == dict
+        assert isinstance(
+            data, dict
         ), f"Unexpected type on path {path} of {type(data)}"
         i = path.find(".", 1)
         path_end = i == -1
@@ -56,13 +56,13 @@ def list_attributes(data: Any, key: str = "") -> Any:
     if key in BLACKLISTED_KEYS:
         return ("TRUNCATED", None)
 
-    if type(data) == dict:
+    if isinstance(data, dict):
         res = {}
         for k, v in data.items():
             next_key = f"{key}.{k}"
             res[next_key] = list_attributes(v, next_key)
         return ("dict", res)
-    elif type(data) == list:
+    elif isinstance(data, list):
         next_key = f"{key}.[]"
         if len(data) == 0:
             return ("list", None)

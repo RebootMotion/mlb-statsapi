@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlb-statsapi"
+version = "1.2.0"
+description = "Wrapper to access stats API data from MLB"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+# Lower bounds guarantee Python 3.12 support and the APIs actually used
+# (DataFrame.from_dict, dotenv_values, Session/HTTPAdapter/Retry); upper bounds
+# cap at the next major, where breaking changes land.
+dependencies = [
+    "pandas>=2.1,<4",
+    "python-dotenv>=1.0,<2",
+    "requests>=2.31,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7,<10",
+]
+# Interactive Okta browser login (mlb_statsapi.auth.login_with_browser).
+# After install, run: playwright install chromium
+auth = [
+    "playwright>=1.49,<2",
+]
+
+[tool.setuptools]
+packages = ["mlb_statsapi"]

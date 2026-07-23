@@ -7,5 +7,71 @@ Please look in the examples folder for usage. For available attributes on the da
 To see all fields available on the raw game feed data, please view docs/game_data.txt. This is still a WIP so may contain errors or omissions.
 
 
+## Stats API client (`StatsApiClient`)
+
+`mlb_statsapi.StatsApiClient` is a small synchronous wrapper over the Stats API
+returning raw JSON dicts, with `requests`-level retries and errors surfaced as
+`StatsApiError` / `StatsApiAuthError`.
+
+The surface is split in two, so a convenience shortcut is never the only way to
+reach the data:
+
+| Kind | Methods | Returns |
+|------|---------|---------|
+| **Endpoint** | `get_person`, `get_person_stats`, `get_schedule`, `get_boxscore`, `get_game_guids` | what the endpoint returns — nothing dropped |
+| **Derived** | `get_person_game_log`, `get_scheduled_games`, `get_game_pitchers` | a reshaped view layered on the endpoint methods |
+
+```python
+from mlb_statsapi import StatsApiClient
+
+client = StatsApiClient()
+
+person = client.get_person(660271)                       # public
+payload = client.get_schedule(start_date="2026-06-01")   # raw, keeps dates[] grouping
+games = client.get_scheduled_games(start_date="2026-06-01", sport_id=11)  # flat, Triple-A
+log = client.get_person_game_log(660271, season=2026, group="pitching")
+guids = client.get_game_guids(745123, access_token="<okta bearer>")  # auth required
+```
+
+Anything not wrapped yet is reachable through `get()`:
+
+```python
+client.get("/teams", params={"sportId": 1})
+```
+
+
+## Okta login (`mlb_statsapi.auth`)
+
+Endpoints like the play-guids endpoint need an MLB-org bearer token.
+`login_with_browser()` opens a browser for Okta sign-in and returns the captured
+token (held in memory by the caller — not written to disk). It needs the `[auth]`
+extra's Playwright:
+
+```bash
+pip install '.[auth]'
+playwright install chromium
+```
+
+```python
+from mlb_statsapi.auth import login_with_browser
+token = login_with_browser()   # blocking; run off the event loop in async code
+```
+
+
+## Pitch bucketing (`mlb_statsapi.bucketing`)
+
+`split_guids()` groups a pitcher's play GUIDs (from `get_game_guids`) into named
+buckets by a comparison type — windup vs stretch, pitch type, batter hand,
+two-strike count, or inning range:
+
+```python
+from mlb_statsapi.bucketing import split_guids, COMPARISON_TYPES
+
+result = split_guids(games, pitcher_id=660271, comparison_type="windup_stretch")
+result.buckets          # {"windup": [...guids], "stretch": [...guids]}
+result.dominant_hand    # "left" | "right"
+```
+
+
 ## License
 Please see LICENSE and LICENSE.mlb file for usage
