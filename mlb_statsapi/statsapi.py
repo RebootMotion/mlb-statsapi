@@ -25,6 +25,7 @@ token (see :mod:`mlb_statsapi.auth`). Errors surface as :class:`StatsApiError`
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from requests.adapters import HTTPAdapter, Retry
@@ -67,6 +68,40 @@ class StatsApiClient:
 
     # -- core -----------------------------------------------------------------
 
+    def _request(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        access_token: str | None = None,
+        not_found_ok: bool = False,
+        error_label: str | None = None,
+    ) -> requests.Response | None:
+        """GET a full URL, applying auth and the shared status-code handling.
+
+        Returns the raw :class:`requests.Response`, or ``None`` on HTTP 404 when
+        ``not_found_ok``. Callers either decode it (:meth:`get`) or read ``.content`` verbatim
+        (the store-as-landed paths). ``error_label`` is what appears in error messages (a path
+        for :meth:`get`, the URL otherwise).
+
+        :raises StatsApiAuthError: HTTP 401 (missing/expired token).
+        :raises StatsApiError: Any other non-2xx or a transport failure.
+        """
+        label = error_label or url
+        headers = {"Authorization": f"Bearer {access_token}"} if access_token else None
+        try:
+            response = self._session.get(url, params=params, headers=headers, timeout=_TIMEOUT_S)
+        except requests.RequestException as err:
+            raise StatsApiError(f"MLB Stats API request failed for {label}: {err}") from err
+        if response.status_code == 401:
+            raise StatsApiAuthError("MLB Stats API rejected the access token — sign in again")
+        if response.status_code == 404 and not_found_ok:
+            # Caller treats a missing resource as an empty result, not an error.
+            return None
+        if response.status_code >= 400:
+            raise StatsApiError(f"MLB Stats API returned {response.status_code} for {label}")
+        return response
+
     def get(
         self,
         path: str,
@@ -85,19 +120,15 @@ class StatsApiClient:
         :raises StatsApiError: Any other non-2xx, a transport failure, or a
             non-JSON body.
         """
-        url = f"{self._base_url}{path}"
-        headers = {"Authorization": f"Bearer {access_token}"} if access_token else None
-        try:
-            response = self._session.get(url, params=params, headers=headers, timeout=_TIMEOUT_S)
-        except requests.RequestException as err:
-            raise StatsApiError(f"MLB Stats API request failed for {path}: {err}") from err
-        if response.status_code == 401:
-            raise StatsApiAuthError("MLB Stats API rejected the access token — sign in again")
-        if response.status_code == 404 and not_found_ok:
-            # Caller treats a missing resource as an empty result, not an error.
+        response = self._request(
+            f"{self._base_url}{path}",
+            params=params,
+            access_token=access_token,
+            not_found_ok=not_found_ok,
+            error_label=path,
+        )
+        if response is None:
             return None
-        if response.status_code >= 400:
-            raise StatsApiError(f"MLB Stats API returned {response.status_code} for {path}")
         try:
             return response.json()
         except ValueError as err:
@@ -211,6 +242,59 @@ class StatsApiClient:
         if not isinstance(data, list):
             raise StatsApiError(f"Unexpected guids response for game {game_pk}")
         return data
+
+    def get_play_parsed(self, game_pk: int, guid: str, *, access_token: str) -> bytes:
+        """Fetch one play's parsed analytics as raw JSON bytes (auth required).
+
+        Returns the response body UNDECODED. The parsed payload carries ``gameEvent.lineup``
+        (the positionId → MLB personId map silver pose attribution reads) and pitch/ball context,
+        but callers that land it in bronze want the bytes verbatim — decoding to a dict and
+        re-encoding would waste CPU/memory on a large body and could alter the serialization
+        (silver re-parses the landed file as VARIANT). The guids manifest lists a ``parsedFile``
+        for every play, so this resolves for any guid from :meth:`get_game_guids`.
+        """
+        return self._request(
+            f"{self._base_url}/game/{game_pk}/{guid}/analytics/parsed", access_token=access_token
+        ).content
+
+    def get_skeletal_file_names(
+        self,
+        game_pk: int,
+        guid: str,
+        *,
+        access_token: str,
+        not_found_ok: bool = True,
+    ) -> list[str]:
+        """List a play's skeletal-data chunk URLs (auth required).
+
+        Returns the ``fileNames`` array (absolute chunk URLs). Roughly 40% of plays have no
+        skeletal pose; those yield an empty list (the endpoint 404s or omits ``fileNames``) —
+        a normal miss, not an error, hence ``not_found_ok=True`` by default.
+        """
+        data = self.get(
+            f"/game/{game_pk}/{guid}/analytics/skeletalData/files",
+            access_token=access_token,
+            not_found_ok=not_found_ok,
+        )
+        file_names = (data or {}).get("fileNames", [])
+        return file_names if isinstance(file_names, list) else []
+
+    def get_skeletal_chunk(self, file_url: str, *, access_token: str) -> bytes:
+        """Fetch one skeletal chunk by its absolute URL, returned as raw bytes (auth required).
+
+        ``file_url`` comes from :meth:`get_skeletal_file_names`. The vendor emits these URLs with
+        an ``http://`` scheme; we validate the HOST against this client's base (an SSRF guard so
+        the bearer token is only ever sent to the configured MLB host) and force ``https`` so the
+        token is never transmitted in plaintext — a scheme-sensitive prefix check would instead
+        reject every (``http``) chunk URL. Returned UNDECODED for the same reason as
+        :meth:`get_play_parsed`: chunks are large and land in bronze verbatim.
+        """
+        base_host = urlsplit(self._base_url).netloc
+        target = urlsplit(file_url)
+        if target.netloc != base_host:
+            raise StatsApiError(f"Refusing to fetch skeletal chunk from a non-base host: {file_url}")
+        secure_url = urlunsplit(("https", target.netloc, target.path, target.query, target.fragment))
+        return self._request(secure_url, access_token=access_token).content
 
     # -- derived views --------------------------------------------------------
 

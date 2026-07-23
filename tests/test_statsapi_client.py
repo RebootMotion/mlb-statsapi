@@ -16,10 +16,13 @@ from mlb_statsapi.statsapi import StatsApiAuthError, StatsApiClient, StatsApiErr
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, payload: Any = None, *, json_raises: bool = False) -> None:
+    def __init__(
+        self, status_code: int, payload: Any = None, *, json_raises: bool = False, content: bytes = b""
+    ) -> None:
         self.status_code = status_code
         self._payload = payload
         self._json_raises = json_raises
+        self.content = content
 
     def json(self) -> Any:
         if self._json_raises:
@@ -222,3 +225,39 @@ class TestDerivedViews:
     def test_get_game_pitchers_empty_body(self) -> None:
         client = client_with_response(FakeResponse(200, {}))
         assert client.get_game_pitchers(745123) == []
+
+
+class TestLfrSkeletalEndpoints:
+    """The Hawk-Eye LFR pull endpoints (used by scripts/download_hawkeye_lfr_from_statsapi.py)."""
+
+    def test_get_play_parsed_returns_raw_bytes(self) -> None:
+        # Parsed lands in bronze verbatim, so the client must return the undecoded body bytes.
+        client = client_with_response(FakeResponse(200, content=b'{"Play":{"playId":"g"}}'))
+        assert client.get_play_parsed(823850, "g", access_token="tok") == b'{"Play":{"playId":"g"}}'
+        assert client._session.get.call_args.args[0].endswith("/game/823850/g/analytics/parsed")
+
+    def test_get_skeletal_file_names_returns_list(self) -> None:
+        urls = ["http://statsapi.mlb.com/api/v1/game/1/g/analytics/skeletalData/chunked?fileName=file_1"]
+        client = client_with_response(FakeResponse(200, {"fileNames": urls}))
+        assert client.get_skeletal_file_names(1, "g", access_token="tok") == urls
+
+    def test_get_skeletal_file_names_empty_when_no_pose(self) -> None:
+        # ~40% of plays have no skeletal pose — the files endpoint 404s, treated as an empty list.
+        client = client_with_response(FakeResponse(404))
+        assert client.get_skeletal_file_names(1, "g", access_token="tok") == []
+
+    def test_get_skeletal_chunk_upgrades_http_to_https_and_returns_bytes(self) -> None:
+        # Regression: the vendor emits http:// chunk URLs; the client must accept them (host match)
+        # and fetch over https so the bearer token is never sent in plaintext.
+        client = client_with_response(FakeResponse(200, content=b"chunkbytes"))
+        http_url = "http://statsapi.mlb.com/api/v1/game/1/g/analytics/skeletalData/chunked?fileName=file_1"
+        assert client.get_skeletal_chunk(http_url, access_token="tok") == b"chunkbytes"
+        fetched = client._session.get.call_args.args[0]
+        assert fetched.startswith("https://statsapi.mlb.com/")
+        assert "fileName=file_1" in fetched
+
+    def test_get_skeletal_chunk_rejects_foreign_host(self) -> None:
+        client = client_with_response(FakeResponse(200, content=b"x"))
+        with pytest.raises(StatsApiError):
+            client.get_skeletal_chunk("http://evil.example.com/steal?fileName=file_1", access_token="tok")
+        client._session.get.assert_not_called()
